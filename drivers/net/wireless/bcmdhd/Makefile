@@ -11,6 +11,10 @@ DHDCFLAGS = -Wall -Wstrict-prototypes -Dlinux -DBCMDRIVER                     \
 	-DSET_RANDOM_MAC_SOFTAP -DWL_CFG80211_STA_EVENT -DSUPPORT_PM2_ONLY    \
 	-Idrivers/net/wireless/bcmdhd -Idrivers/net/wireless/bcmdhd/include
 
+ifeq ($(CONFIG_BCMDHD_CUSTOM_REGULATORY_DOMAIN),y)
+DHDCFLAGS += -DENABLE_CUSTOM_REGULATORY_DOMAIN
+endif
+
 DHDOFILES = aiutils.o bcmsdh_sdmmc_linux.o dhd_linux.o siutils.o bcmutils.o   \
 	dhd_linux_sched.o bcmwifi.o dhd_sdio.o bcmevent.o dhd_bta.o hndpmu.o  \
 	bcmsdh.o dhd_cdc.o bcmsdh_linux.o dhd_common.o linux_osl.o            \
