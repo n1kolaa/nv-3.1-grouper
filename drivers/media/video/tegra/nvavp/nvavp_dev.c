@@ -118,6 +118,7 @@ struct nvavp_info {
 
 	struct nvhost_device		*nvhost_dev;
 	struct miscdevice		misc_dev;
+	atomic_t				clock_stay_on_refcount;
 };
 
 struct nvavp_clientctx {
@@ -128,6 +129,7 @@ struct nvavp_clientctx {
 	int num_relocs;
 	struct nvavp_info *nvavp;
 	u32 clk_reqs;
+	int clock_stay_on;
 };
 
 static struct clk *nvavp_clk_get(struct nvavp_info *nvavp, int id)
@@ -176,7 +178,8 @@ static void nvavp_clks_disable(struct nvavp_info *nvavp)
 static u32 nvavp_check_idle(struct nvavp_info *nvavp)
 {
 	struct nv_e276_control *control = nvavp->os_control;
-	return (control->put == control->get) ? 1 : 0;
+	return ((control->put == control->get)
+		&& (!atomic_read(&nvavp->clock_stay_on_refcount))) ? 1 : 0;
 }
 
 static void clock_disable_handler(struct work_struct *work)
@@ -1049,14 +1052,14 @@ static int nvavp_force_clock_stay_on_ioctl(struct file *filp, unsigned int cmd,
 	struct nvavp_clock_stay_on_state_args clock;
 
 	if (copy_from_user(&clock, (void __user *)arg,
-			   sizeof(struct nvavp_clock_stay_on_state_args)))
+			sizeof(struct nvavp_clock_stay_on_state_args)))
 		return -EFAULT;
 
 	dev_dbg(&nvavp->nvhost_dev->dev, "%s: state=%d\n",
 		__func__, clock.state);
 
 	if (clock.state != NVAVP_CLOCK_STAY_ON_DISABLED &&
-	    clock.state !=  NVAVP_CLOCK_STAY_ON_ENABLED) {
+		clock.state !=  NVAVP_CLOCK_STAY_ON_ENABLED) {
 		dev_err(&nvavp->nvhost_dev->dev, "%s: invalid argument=%d\n",
 			__func__, clock.state);
 		return -EINVAL;
@@ -1071,6 +1074,17 @@ static int nvavp_force_clock_stay_on_ioctl(struct file *filp, unsigned int cmd,
 			nvavp_clks_disable(nvavp);
 	}
 	mutex_unlock(&nvavp->open_lock);
+
+	if (clientctx->clock_stay_on == clock.state)
+		return 0;
+
+	clientctx->clock_stay_on = clock.state;
+
+	if (clientctx->clock_stay_on == NVAVP_CLOCK_STAY_ON_ENABLED)
+		atomic_inc(&nvavp->clock_stay_on_refcount);
+	else if (clientctx->clock_stay_on == NVAVP_CLOCK_STAY_ON_DISABLED)
+		atomic_dec(&nvavp->clock_stay_on_refcount);
+
 	return 0;
 }
 
@@ -1099,6 +1113,7 @@ static int tegra_nvavp_open(struct inode *inode, struct file *filp)
 
 	clientctx->nvmap = nvavp->nvmap;
 	clientctx->nvavp = nvavp;
+	clientctx->clock_stay_on = NVAVP_CLOCK_STAY_ON_DISABLED;
 
 	filp->private_data = clientctx;
 
@@ -1130,6 +1145,8 @@ static int tegra_nvavp_release(struct inode *inode, struct file *filp)
 	if (clientctx->clk_reqs)
 		nvavp_clks_disable(nvavp);
 
+	if (clientctx->clock_stay_on ==  NVAVP_CLOCK_STAY_ON_ENABLED)
+		atomic_dec(&nvavp->clock_stay_on_refcount);
 	if (nvavp->refcount > 0)
 		nvavp->refcount--;
 	if (!nvavp->refcount)
