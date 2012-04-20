@@ -468,7 +468,9 @@ unsigned int tegra_getspeed(unsigned int cpu)
 	rate = clk_get_rate(cpu_clk) / 1000;
 	return rate;
 }
+
 extern bool stress_test_enable;
+
 int tegra_update_cpu_speed(unsigned long rate)
 {
 	int ret = 0;
