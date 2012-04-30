@@ -486,8 +486,7 @@ static int tegra_otg_probe(struct platform_device *pdev)
 		goto err_otg;
 	}
 
-	res = platform_get_re
-source(pdev, IORESOURCE_IRQ, 0);
+	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 	if (!res) {
 		dev_err(&pdev->dev, "Failed to get IRQ\n");
 		err = -ENXIO;
