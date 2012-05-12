@@ -310,7 +310,7 @@ static int min_cpus_notify(struct notifier_block *nb, unsigned long n, void *p)
 {
 	mutex_lock(tegra3_cpu_lock);
 
-	if ((n >= 2) && is_lp_cluster()) {
+	if ((n >= 1) && is_lp_cluster()) {
 		/* make sure cpu rate is within g-mode range before switching */
 		unsigned int speed = max(
 			tegra_getspeed(0), clk_get_min_rate(cpu_g_clk) / 1000);
