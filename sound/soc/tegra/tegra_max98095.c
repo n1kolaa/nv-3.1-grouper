@@ -577,6 +577,7 @@ static struct snd_soc_dai_link tegra_max98095_dai[] = {
 };
 
 static int tegra30_soc_set_bias_level(struct snd_soc_card *card,
+					struct snd_soc_dapm_context *dapm,
 					enum snd_soc_bias_level level)
 {
 	struct tegra_max98095 *machine = snd_soc_card_get_drvdata(card);
@@ -591,6 +592,7 @@ static int tegra30_soc_set_bias_level(struct snd_soc_card *card,
 }
 
 static int tegra30_soc_set_bias_level_post(struct snd_soc_card *card,
+					struct snd_soc_dapm_context *dapm,
 					enum snd_soc_bias_level level)
 {
 	struct tegra_max98095 *machine = snd_soc_card_get_drvdata(card);
@@ -668,8 +670,8 @@ err_unregister_card:
 err_switch_unregister:
 #ifdef CONFIG_SWITCH
 	switch_dev_unregister(&wired_switch_dev);
-#endif
 err_fini_utils:
+#endif
 	tegra_asoc_utils_fini(&machine->util_data);
 err_free_machine:
 	kfree(machine);
