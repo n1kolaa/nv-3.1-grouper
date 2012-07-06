@@ -376,7 +376,7 @@ static void p1852_spi_init(void)
 }
 
 static struct platform_device *p1852_devices[] __initdata = {
-#if defined(CONFIG_TEGRA_IOVMM_SMMU)
+#if defined(CONFIG_TEGRA_IOVMM_SMMU) || defined(CONFIG_TEGRA_IOMMU_SMMU)
 	&tegra_smmu_device,
 #endif
 #if defined(CONFIG_TEGRA_AVP)
