@@ -103,7 +103,11 @@ struct nvhost_device t30_devices[] = {
 	.name		= "isp",
 	.id		= -1,
 	.index		= 3,
-	.syncpts	= 0,
+	.syncpts	= BIT(NVSYNCPT_VI_ISP_2) | BIT(NVSYNCPT_VI_ISP_3) |
+			  BIT(NVSYNCPT_VI_ISP_4),
+	.clocks		= { {"epp", 0}
+			  },
+	.keepalive	= true,
 	NVHOST_MODULE_NO_POWERGATE_IDS,
 	NVHOST_DEFAULT_CLOCKGATE_DELAY,
 	.moduleid	= NVHOST_MODULE_ISP,
