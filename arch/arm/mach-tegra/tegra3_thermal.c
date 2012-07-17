@@ -407,6 +407,8 @@ static int tegra_thermal_shutdown_temp_tj_set(void *data, u64 val)
 
 	tegra_thermal_alert(&thermal_state);
 
+	register_pm_notifier(&tegra_thermal_nb);
+
 	return 0;
 }
 
