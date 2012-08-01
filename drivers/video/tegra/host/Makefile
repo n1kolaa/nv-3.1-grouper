@@ -20,5 +20,7 @@ obj-$(CONFIG_TEGRA_GRHOST) += t20/
 obj-$(CONFIG_TEGRA_GRHOST) += t30/
 obj-$(CONFIG_TEGRA_GRHOST) += gr2d/
 obj-$(CONFIG_TEGRA_GRHOST) += isp/
+ifeq ($(CONFIG_TEGRA_CAMERA),y)
 obj-$(CONFIG_TEGRA_GRHOST) += vi/
+endif
 obj-$(CONFIG_TEGRA_GRHOST) += nvhost.o
