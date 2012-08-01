@@ -177,4 +177,8 @@ static inline struct nvhost_master *nvhost_get_host(struct nvhost_device *_dev)
 
 int nvhost_bus_add_host(struct nvhost_master *host);
 
+/* Hacky way to get access to struct nvhost_device tegra_vi01_device. */
+struct nvhost_device *t20_get_tegra_vi01_device(void);
+struct nvhost_device *t30_get_tegra_vi01_device(void);
+
 #endif
