@@ -1041,7 +1041,6 @@ static void usb_net_raw_ip_tx_urb_work(struct work_struct *work)
 
 	/* check if usb interface disconnected */
 	if (!usb->usb.interface) {
-<<<<<<< HEAD
 		pr_err("%s: not submitting tx urb -interface disconnected\n",
 			__func__);
 		return;
@@ -1051,10 +1050,6 @@ static void usb_net_raw_ip_tx_urb_work(struct work_struct *work)
 	if (usb->susp_count > 0) {
 		pr_info("%s: usb->susp_count %d > 0 (suspended)\n",
 			__func__, usb->susp_count);
-=======
-		pr_err("%s: not submitting tx urb %p -interface disconnected\n",
-			__func__, urb);
->>>>>>> 5847468... net: usb: raw-ip: do not free skb if TX_BUSY flag set
 		return;
 	}
 
@@ -1063,23 +1058,6 @@ static void usb_net_raw_ip_tx_urb_work(struct work_struct *work)
 		!= (struct urb *) 0) {
 		/* decrement count from usb_get_from_anchor() */
 		usb_free_urb(urb);
-<<<<<<< HEAD
-		/* check if usb interface disconnected */
-		if (!usb->usb.interface) {
-			pr_err("%s: not submitting tx urb %p"
-				" - interface disconnected\n",
-				__func__, urb);
-			if (urb->transfer_buffer) {
-				kfree(urb->transfer_buffer);
-				urb->transfer_buffer = (void *) 0;
-			}
-			usb_free_urb(urb);
-			usb->stats.tx_errors++;
-			continue;
-		}
-=======
-
->>>>>>> 5847468... net: usb: raw-ip: do not free skb if TX_BUSY flag set
 		/* autoresume before tx */
 		usb_mark_last_busy(usb->usb.device);
 		/* submit tx urb */
