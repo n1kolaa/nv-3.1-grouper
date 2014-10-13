@@ -243,6 +243,20 @@ static int grouper_wifi_reset(int on)
 	return 0;
 }
 
+#ifdef TEGRA_PREPOWER_WIFI
+static int __init grouper_wifi_prepower(void)
+{
+	if (!machine_is_grouper())
+		return 0;
+
+	grouper_wifi_power(1);
+
+	return 0;
+}
+
+subsys_initcall_sync(grouper_wifi_prepower);
+#endif
+
 static int __init grouper_wifi_init(void)
 {
 	int rc;
