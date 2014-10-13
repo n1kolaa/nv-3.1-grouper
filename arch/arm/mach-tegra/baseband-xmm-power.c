@@ -692,11 +692,10 @@ void baseband_xmm_set_power_status(unsigned int status)
 			baseband_xmm_powerstate = status;
 			pr_debug("BB XMM POWER STATE = %d\n", status);
 			baseband_xmm_power_L2_resume();
-		} else
-			goto exit_without_state_change;
 		}
 		baseband_xmm_powerstate = status;
 		break;
+
 	case BBXMM_PS_L3TOL0:
 		/* poweron rail for L3 -> L0 (system resume) */
 		pr_debug("L3 -> L0, turning on power rail.\n");
