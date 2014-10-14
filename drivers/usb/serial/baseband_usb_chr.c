@@ -3,7 +3,7 @@
  *
  * USB character driver to communicate with baseband modems.
  *
- * Copyright (c) 2012, NVIDIA Corporation.
+ * Copyright (c) 2012, NVIDIA Corporation.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -40,16 +40,32 @@
 
 MODULE_LICENSE("GPL");
 
-unsigned long baseband_usb_chr_vid = 0x058b;
-unsigned long baseband_usb_chr_pid = 0x0041;
-unsigned long baseband_usb_chr_intf = 0x01;
+/* To add new usb devices, update
+ * (1) baseband_usb_driver_id_table
+ *     - usb vendor id / product id
+ * (2) baseband_usb_driver_intf_table
+ *     - usb interface number
+ */
 
-module_param(baseband_usb_chr_vid, ulong, 0644);
-MODULE_PARM_DESC(baseband_usb_chr_vid, "baseband (usb chr) - USB VID");
-module_param(baseband_usb_chr_pid, ulong, 0644);
-MODULE_PARM_DESC(baseband_usb_chr_pid, "baseband (usb chr) - USB PID");
-module_param(baseband_usb_chr_intf, ulong, 0644);
-MODULE_PARM_DESC(baseband_usb_chr_intf, "baseband (usb chr) - USB interface");
+static struct usb_device_id baseband_usb_driver_id_table[] = {
+	/* XMM modem #1 BOOT ROM */
+	{ USB_DEVICE(0x058b, 0x0041), },
+	/* XMM modem #2 BOOT ROM */
+	{ USB_DEVICE(0x8087, 0x0716), },
+	/* empty entry required to terminate list */
+	{ },
+};
+
+static unsigned int baseband_usb_driver_intf_table[] = {
+	/* XMM modem #1 BOOT ROM */
+	0x01,
+	/* XMM modem #2 BOOT ROM */
+	0x00,
+	/* empty entry required to terminate list */
+	0x00,
+};
+
+MODULE_DEVICE_TABLE(usb, baseband_usb_driver_id_table);
 
 static struct baseband_usb *baseband_usb_chr;
 static struct usb_interface *probe_usb_intf;
@@ -57,7 +73,13 @@ static bool usb_device_connection;
 static struct workqueue_struct *chr_ipc_wq;
 
 static atomic_t g_rx_count = ATOMIC_INIT(0);
-static int queue_need = 0;
+
+struct usb_chr_resource {
+	unsigned char *ipc_rx;
+	unsigned char *ipc_tx;
+	unsigned char *rx_buf;
+};
+static struct usb_chr_resource usb_chr_res;
 
 /* baseband ipc functions */
 
@@ -401,7 +423,7 @@ static ssize_t baseband_ipc_file_write(struct baseband_ipc *ipc,
 
 	/* do not accept write if previous tx not finished */
 	if (peek_ipc_tx_bufsiz(ipc, USB_CHR_TX_BUFSIZ) != 0) {
-		pr_info("%s: not accepting write of %u bytes"
+		pr_debug("%s: not accepting write of %u bytes"
 			" - previous tx not finished\n",
 			__func__, count);
 		return 0;
@@ -506,9 +528,7 @@ static void baseband_ipc_close(struct baseband_ipc *ipc)
 	memset(&ipc->rx.wait, 0, sizeof(ipc->rx.wait));
 
 	/* destroy data buffers */
-	kfree(ipc->ipc_tx);
 	ipc->ipc_tx = (unsigned char *) 0;
-	kfree(ipc->ipc_rx);
 	ipc->ipc_rx = (unsigned char *) 0;
 	list_for_each_entry_safe(ipc_buf, ipc_buf_next, &ipc->tx_free.buf, list)
 	{
@@ -586,16 +606,14 @@ static struct baseband_ipc *baseband_ipc_open(work_func_t work_func,
 			ipc_buf);
 		list_add_tail(&ipc_buf->list, &ipc->tx_free.buf);
 	}
-	ipc->ipc_rx = kmalloc(USB_CHR_RX_BUFSIZ, GFP_KERNEL);
+	ipc->ipc_rx = usb_chr_res.ipc_rx;
 	if (!ipc->ipc_rx) {
-		pr_err("baseband_ipc_open - "
-			"cannot allocate ipc->ipc_rx\n");
+		pr_err("%s: cannot find ipc->ipc_rx\n", __func__);
 		goto error_exit;
 	}
-	ipc->ipc_tx = kmalloc(USB_CHR_TX_BUFSIZ, GFP_KERNEL);
+	ipc->ipc_tx = usb_chr_res.ipc_tx;
 	if (!ipc->ipc_tx) {
-		pr_err("baseband_ipc_open - "
-			"cannot allocate ipc->ipc_tx\n");
+		pr_err("%s: cannot find ipc->ipc_tx\n", __func__);
 		goto error_exit;
 	}
 
@@ -634,10 +652,6 @@ static void baseband_usb_chr_rx_urb_comp(struct urb *urb)
 	struct baseband_usb *usb = (struct baseband_usb *) urb->context;
 
 	pr_debug("baseband_usb_chr_rx_urb_comp { urb %p\n", urb);
-
-	if (urb->status < 0) {
-		pr_err("urb failed, status = %d\n", urb->status);
-		pr_debug("baseband_usb_chr_rx_urb_comp }\n");
 
 	/* check input */
 	if (!usb) {
@@ -797,6 +811,8 @@ static void find_usb_pipe(struct baseband_usb *usb)
 static int baseband_usb_driver_probe(struct usb_interface *intf,
 	const struct usb_device_id *id)
 {
+	int i;
+
 	pr_debug("%s(%d) { intf %p id %p\n", __func__, __LINE__, intf, id);
 
 	pr_debug("intf->cur_altsetting->desc.bInterfaceNumber %02x\n",
@@ -815,21 +831,19 @@ static int baseband_usb_driver_probe(struct usb_interface *intf,
 		intf->cur_altsetting->desc.iInterface);
 
 	/* usb interface mismatch */
-	if (baseband_usb_chr_intf !=
-		intf->cur_altsetting->desc.bInterfaceNumber) {
-		pr_debug("%s(%d) } -ENODEV\n", __func__, __LINE__);
-		return -ENODEV;
+	for (i = 0; baseband_usb_driver_id_table[i].match_flags; i++) {
+		if (id == &baseband_usb_driver_id_table[i]) {
+			if (baseband_usb_driver_intf_table[i] !=
+				intf->cur_altsetting->desc.bInterfaceNumber) {
+				pr_debug("%s(%d) } -ENODEV\n", __func__, __LINE__);
+				return -ENODEV;
+			}
+		}
 	}
 
 	/* usb interface match */
 	probe_usb_intf = intf;
 	usb_device_connection = true;
-
-	if (queue_need) {
-		printk("baseband_usb_driver_probe: queue_work\n");
-		queue_work(baseband_usb_chr->ipc->workqueue, &baseband_usb_chr->ipc->work);
-		queue_need = 0;
-	}
 
 	pr_debug("%s(%d) }\n", __func__, __LINE__);
 	return 0;
@@ -856,22 +870,13 @@ static void baseband_usb_driver_disconnect(struct usb_interface *intf)
 			&& baseband_usb_chr->ipc->workqueue)
 			flush_workqueue(baseband_usb_chr->ipc->workqueue);
 		usb_device_connection = false;
+		probe_usb_intf = NULL;
 	}
-
-	/* init usb struct */
-	memset(&baseband_usb_chr->usb.pipe, 0, sizeof(baseband_usb_chr->usb.pipe));
-	baseband_usb_chr->usb.interface = NULL;
-	baseband_usb_chr->usb.device = NULL;
-
 	pr_debug("%s(%d) }\n", __func__, __LINE__);
 }
 
-static char baseband_usb_driver_name[32];
-
-static struct usb_device_id baseband_usb_driver_id_table[2];
-
 static struct usb_driver baseband_usb_driver = {
-	.name = baseband_usb_driver_name,
+	.name = "bb_usb_chr",
 	.probe = baseband_usb_driver_probe,
 	.disconnect = baseband_usb_driver_disconnect,
 	.id_table = baseband_usb_driver_id_table,
@@ -898,9 +903,8 @@ static void baseband_usb_chr_work(struct work_struct *work)
 	if (!usb->usb.device) {
 		pr_err("baseband_usb_chr_work - "
 			"usb device not probed yet\n");
-		//mdelay(10);
-		//queue_work(usb->ipc->workqueue, &usb->ipc->work);
-		queue_need = 1;
+		mdelay(10);
+		queue_work(usb->ipc->workqueue, &usb->ipc->work);
 		return;
 	}
 	if (!usb->ipc->ipc_rx) {
@@ -956,7 +960,6 @@ static void baseband_usb_close(struct baseband_usb *usb)
 		usb_kill_urb(usb->usb.rx_urb);
 		if (usb->usb.rx_urb->transfer_buffer) {
 			pr_debug("%s: free rx urb transfer buffer\n", __func__);
-			kfree(usb->usb.rx_urb->transfer_buffer);
 			usb->usb.rx_urb->transfer_buffer = (void *) 0;
 		}
 	}
@@ -966,13 +969,6 @@ static void baseband_usb_close(struct baseband_usb *usb)
 		flush_work_sync(&usb->ipc->rx_work);
 	}
 
-	/* close usb driver */
-	if (usb->usb.driver) {
-		pr_debug("close usb driver {\n");
-		usb_deregister(usb->usb.driver);
-		usb->usb.driver = (struct usb_driver *) 0;
-		pr_debug("close usb driver }\n");
-	}
 
 	/* close baseband ipc */
 	if (usb->ipc) {
@@ -988,10 +984,7 @@ static void baseband_usb_close(struct baseband_usb *usb)
 	pr_debug("baseband_usb_close }\n");
 }
 
-static struct baseband_usb *baseband_usb_open(unsigned int vid,
-	unsigned int pid,
-	unsigned int intf,
-	work_func_t work_func,
+static struct baseband_usb *baseband_usb_open(work_func_t work_func,
 	work_func_t rx_work_func,
 	work_func_t tx_work_func)
 {
@@ -1017,31 +1010,17 @@ static struct baseband_usb *baseband_usb_open(unsigned int vid,
 		goto error_exit;
 	}
 
-	/* open usb driver */
-	probe_usb_intf = (struct usb_interface *) 0;
-	sprintf(baseband_usb_driver_name,
-		"baseband_usb_%x_%x_%x",
-		vid, pid, intf);
-	baseband_usb_driver_id_table[0].match_flags
-		= USB_DEVICE_ID_MATCH_DEVICE;
-	baseband_usb_driver_id_table[0].idVendor = vid;
-	baseband_usb_driver_id_table[0].idProduct = pid;
 	usb->usb.driver = &baseband_usb_driver;
-	err = usb_register(&baseband_usb_driver);
-	if (err < 0) {
-		pr_err("cannot open usb driver - err %d\n", err);
-		goto error_exit;
-	}
 
-	/* wait for probe */
-	pr_info("%s: waiting for usb probe...\n", __func__);
-	for (i = 0; i < 5 * 10; i++) {
+	for (i = 0; i < 5 * 50; i++) {
 		if (probe_usb_intf && usb_device_connection)
 			break;
-		msleep(100);
+		/* wait for probe */
+		pr_debug("%s: waiting for usb probe...\n", __func__);
+		msleep(20);
 	}
 	if (!probe_usb_intf || !usb_device_connection) {
-		pr_info("%s: probe timed out!\n", __func__);
+		pr_err("%s: probe timed out!\n", __func__);
 		goto error_exit;
 	}
 
@@ -1076,9 +1055,9 @@ static struct baseband_usb *baseband_usb_open(unsigned int vid,
 		pr_err("usb_alloc_urb() failed\n");
 		goto error_exit;
 	}
-	buf = kmalloc(USB_CHR_RX_BUFSIZ, GFP_KERNEL);
+	buf = usb_chr_res.rx_buf;
 	if (!buf) {
-		pr_err("%s: usb buffer kmalloc() failed\n", __func__);
+		pr_err("%s: usb rx buffer not found\n", __func__);
 		usb_free_urb(urb);
 		goto error_exit;
 	}
@@ -1116,10 +1095,7 @@ static int baseband_usb_chr_open(struct inode *inode, struct file *file)
 	}
 
 	/* open baseband usb */
-	baseband_usb_chr = baseband_usb_open(baseband_usb_chr_vid,
-				baseband_usb_chr_pid,
-				baseband_usb_chr_intf,
-				baseband_usb_chr_work,
+	baseband_usb_chr = baseband_usb_open(baseband_usb_chr_work,
 				baseband_usb_chr_rx_urb_comp_work,
 				(work_func_t) 0);
 	if (!baseband_usb_chr) {
@@ -1235,9 +1211,25 @@ static const struct file_operations baseband_usb_chr_fops = {
 
 static int baseband_usb_chr_init(void)
 {
-	int err;
+	int err = -ENOMEM;
 
 	pr_debug("baseband_usb_chr_init {\n");
+
+	usb_chr_res.ipc_rx = kmalloc(USB_CHR_RX_BUFSIZ, GFP_KERNEL);
+	if (!usb_chr_res.ipc_rx) {
+		pr_err("cannot allocate ipc_rx\n");
+		goto error;
+	}
+	usb_chr_res.ipc_tx = kmalloc(USB_CHR_TX_BUFSIZ, GFP_KERNEL);
+	if (!usb_chr_res.ipc_tx) {
+		pr_err("cannot allocate ipc_tx\n");
+		goto error;
+	}
+	usb_chr_res.rx_buf = kmalloc(USB_CHR_RX_BUFSIZ, GFP_KERNEL);
+	if (!usb_chr_res.rx_buf) {
+		pr_err("%s: usb buffer kmalloc() failed\n", __func__);
+		goto error;
+	}
 
 	/* register character device */
 	err = register_chrdev(BASEBAND_USB_CHR_DEV_MAJOR,
@@ -1245,7 +1237,7 @@ static int baseband_usb_chr_init(void)
 		&baseband_usb_chr_fops);
 	if (err < 0) {
 		pr_err("cannot register character device - %d\n", err);
-		return err;
+		goto error;
 	}
 	pr_debug("registered baseband usb character device - major %d\n",
 		BASEBAND_USB_CHR_DEV_MAJOR);
@@ -1256,11 +1248,30 @@ static int baseband_usb_chr_init(void)
 		pr_err("cannot create workqueue\n");
 		unregister_chrdev(BASEBAND_USB_CHR_DEV_MAJOR,
 			BASEBAND_USB_CHR_DEV_NAME);
-		return -ENODEV;
+		err = -ENODEV;
+		goto error;
+	}
+
+	/* register usb driver */
+	err = usb_register(&baseband_usb_driver);
+	if (err < 0) {
+		pr_err("%s: cannot register usb driver %d\n", __func__, err);
+		goto error2;
 	}
 
 	pr_debug("baseband_usb_chr_init }\n");
 	return 0;
+
+error2:
+	unregister_chrdev(BASEBAND_USB_CHR_DEV_MAJOR,
+			BASEBAND_USB_CHR_DEV_NAME);
+	destroy_workqueue(chr_ipc_wq);
+	chr_ipc_wq = NULL;
+error:
+	kfree(usb_chr_res.ipc_rx);
+	kfree(usb_chr_res.ipc_tx);
+	kfree(usb_chr_res.rx_buf);
+	return err;
 }
 
 static void baseband_usb_chr_exit(void)
@@ -1275,9 +1286,16 @@ static void baseband_usb_chr_exit(void)
 		destroy_workqueue(chr_ipc_wq);
 		chr_ipc_wq = NULL;
 	}
+
+	/* close usb driver */
+	usb_deregister(&baseband_usb_driver);
+
+	kfree(usb_chr_res.ipc_rx);
+	kfree(usb_chr_res.ipc_tx);
+	kfree(usb_chr_res.rx_buf);
+
 	pr_debug("baseband_usb_chr_exit }\n");
 }
 
 module_init(baseband_usb_chr_init)
 module_exit(baseband_usb_chr_exit)
-
