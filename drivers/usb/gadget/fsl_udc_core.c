@@ -1563,8 +1563,6 @@ static int fsl_vbus_session(struct usb_gadget *gadget, int is_active)
 
 	VDBG("VBUS %s", is_active ? "on" : "off");
 
-
-=======
 	if (udc->vbus_active && !is_active) {
 		/* If cable disconnected, cancel any delayed work */
 		cancel_delayed_work(&udc->work);
