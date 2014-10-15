@@ -90,10 +90,6 @@ static int tegra_camera_disable_clk(struct tegra_camera_dev *dev)
 	clk_disable(dev->isp_clk);
 	tegra_periph_reset_assert(dev->isp_clk);
 	clk_disable(dev->csus_clk);
-
-	return 0;
-}
-
 	clk_disable(dev->vi_sensor_clk);
 	clk_disable(dev->vi_clk);
 	tegra_periph_reset_assert(dev->vi_clk);
