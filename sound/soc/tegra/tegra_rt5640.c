@@ -281,6 +281,7 @@ static int tegra_rt5640_jack_notifier(struct notifier_block *self,
 	struct tegra_rt5640 *machine = snd_soc_card_get_drvdata(card);
 	struct tegra_rt5640_platform_data *pdata = machine->pdata;
 	enum headset_state state = BIT_NO_HEADSET;
+#if 0
 	unsigned char status_jack = 0;
 
 	if (jack == &tegra_rt5640_hp_jack) {
@@ -319,6 +320,7 @@ static int tegra_rt5640_jack_notifier(struct notifier_block *self,
 			machine->jack_status &= ~SND_JACK_MICROPHONE;
 		}
 	}
+#endif
 	switch (machine->jack_status) {
 	case SND_JACK_HEADPHONE:
 		state = BIT_HEADSET_NO_MIC;
