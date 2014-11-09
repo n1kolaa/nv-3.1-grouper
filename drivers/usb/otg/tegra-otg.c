@@ -505,7 +505,7 @@ static int tegra_otg_probe(struct platform_device *pdev)
 	if (!ehci_pdata->default_enable)
 		clk_disable(tegra->clk);
 
-	tegra->intr_reg_data = tegra->intr_reg_data | USB_INT_ENS;
+	tegra->intr_reg_data = tegra->intr_reg_data | USB_INT_EN;
 	dev_info(&pdev->dev, "otg transceiver registered\n");
 
 	err = device_create_file(&pdev->dev, &dev_attr_enable_host);
