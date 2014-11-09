@@ -22,10 +22,13 @@
 #include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/i2c.h>
+#include <linux/nct1008.h>
 #include <linux/mpu.h>
 #include <linux/regulator/consumer.h>
+#include <linux/slab.h>
 #include <asm/mach-types.h>
 #include <mach/gpio.h>
+#include <mach/thermal.h>
 #ifdef CONFIG_VIDEO_OV2710
 #include <media/ov2710.h>
 #endif
@@ -47,6 +50,110 @@ static int front_yuv_sensor_rst_gpio = FRONT_YUV_SENSOR_RST_GPIO;
 static struct regulator *grouper_1v8_ldo5;
 static struct regulator *grouper_1v8_cam3;
 static struct regulator *grouper_vdd_cam3;
+
+#ifndef CONFIG_TEGRA_INTERNAL_TSENSOR_EDP_SUPPORT
+static int nct_get_temp(void *_data, long *temp)
+{
+	struct nct1008_data *data = _data;
+	return nct1008_thermal_get_temp(data, temp);
+}
+
+static int nct_get_temp_low(void *_data, long *temp)
+{
+	struct nct1008_data *data = _data;
+	return nct1008_thermal_get_temp_low(data, temp);
+}
+
+static int nct_set_limits(void *_data,
+			long lo_limit_milli,
+			long hi_limit_milli)
+{
+	struct nct1008_data *data = _data;
+	return nct1008_thermal_set_limits(data,
+					lo_limit_milli,
+					hi_limit_milli);
+}
+
+static int nct_set_alert(void *_data,
+				void (*alert_func)(void *),
+				void *alert_data)
+{
+	struct nct1008_data *data = _data;
+	return nct1008_thermal_set_alert(data, alert_func, alert_data);
+}
+
+static int nct_set_shutdown_temp(void *_data, long shutdown_temp)
+{
+	struct nct1008_data *data = _data;
+	return nct1008_thermal_set_shutdown_temp(data, shutdown_temp);
+}
+
+static void nct1008_probe_callback(struct nct1008_data *data)
+{
+	struct tegra_thermal_device *thermal_device;
+
+	thermal_device = kzalloc(sizeof(struct tegra_thermal_device),
+					GFP_KERNEL);
+	if (!thermal_device) {
+		pr_err("unable to allocate thermal device\n");
+		return;
+	}
+
+	thermal_device->name = "nct1008";
+	thermal_device->data = data;
+	thermal_device->offset = TDIODE_OFFSET;
+	thermal_device->get_temp = nct_get_temp;
+	thermal_device->get_temp_low = nct_get_temp_low;
+	thermal_device->set_limits = nct_set_limits;
+	thermal_device->set_alert = nct_set_alert;
+	thermal_device->set_shutdown_temp = nct_set_shutdown_temp;
+
+	tegra_thermal_set_device(thermal_device);
+}
+#endif
+
+static struct nct1008_platform_data grouper_nct1008_pdata = {
+	.supported_hwrev = true,
+	.ext_range = true,
+	.conv_rate = 0x08,
+	.offset = 8, /* 4 * 2C. 1C for device accuracies */
+#ifndef CONFIG_TEGRA_INTERNAL_TSENSOR_EDP_SUPPORT
+	.probe_callback = nct1008_probe_callback,
+#endif
+};
+
+static struct i2c_board_info grouper_i2c4_nct1008_board_info[] = {
+	{
+		I2C_BOARD_INFO("nct1008", 0x4C),
+		.platform_data = &grouper_nct1008_pdata,
+		.irq = -1,
+	}
+};
+
+static int grouper_nct1008_init(void)
+{
+	int ret = 0;
+
+	/* FIXME: enable irq when throttling is supported */
+	grouper_i2c4_nct1008_board_info[0].irq =
+		TEGRA_GPIO_TO_IRQ(GROUPER_TEMP_ALERT_GPIO);
+
+	ret = gpio_request(GROUPER_TEMP_ALERT_GPIO, "temp_alert");
+	if (ret < 0) {
+		pr_err("%s: gpio_request failed\n", __func__);
+		return ret;
+	}
+
+	ret = gpio_direction_input(GROUPER_TEMP_ALERT_GPIO);
+	if (ret < 0) {
+		pr_err("%s: set gpio to input failed\n", __func__);
+		gpio_free(GROUPER_TEMP_ALERT_GPIO);
+	}
+	else
+		tegra_gpio_enable(GROUPER_TEMP_ALERT_GPIO);
+
+	return ret;
+}
 
 static unsigned int pmic_id;
 
@@ -449,6 +556,14 @@ static int grouper_nct1008_init(void)
 int __init grouper_sensors_init(void)
 {
 	int err;
+
+	err = grouper_nct1008_init();
+	if (err)
+		pr_err("%s: nct1008 init failed\n", __func__);
+	else
+		i2c_register_board_info(4, grouper_i2c4_nct1008_board_info,
+			ARRAY_SIZE(grouper_i2c4_nct1008_board_info));
+
 	grouper_camera_init();
 
 #ifdef CONFIG_VIDEO_OV2710
