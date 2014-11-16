@@ -19,7 +19,6 @@
  */
 
 #include "nvhost_hwctx.h"
-#include "nvhost_channel.h"
 #include "dev.h"
 #include "host1x/host1x_hardware.h"
 #include "host1x/host1x_channel.h"

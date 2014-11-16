@@ -374,8 +374,8 @@ static struct tps80031_bg_platform_data battery_gauge_data = {
 
 
 static struct tps80031_subdev_info tps80031_devs_a02[] = {
-	TPS_REG(VIO, vio, a02),
 	TPS80031_DEVS_COMMON,
+	TPS_REG(VIO, vio, a02),
 	TPS_REG(SMPS4, smps4, a02),
 	TPS_REG(LDO1, ldo1, a02),
 	TPS_REG(LDO4, ldo4, a02),
@@ -387,8 +387,8 @@ static struct tps80031_subdev_info tps80031_devs_a02[] = {
 };
 
 static struct tps80031_subdev_info tps80031_devs_a03[] = {
-	TPS_REG(VIO, vio, a03),
 	TPS80031_DEVS_COMMON,
+	TPS_REG(VIO, vio, a03),
 	TPS_REG(SMPS4, smps4, a03),
 	TPS_REG(LDO1, ldo1, a03),
 	TPS_REG(LDO4, ldo4, a03),
@@ -644,12 +644,8 @@ FIXED_REG(8, lcd_1v8_en,  NULL,
 	ADD_FIXED_REG(cam_ldo_1v8_en)
 
 static struct platform_device *fixed_regs_devices_a02[] = {
-	ADD_FIXED_REG(pmu_5v15_en),	\
-	ADD_FIXED_REG(pmu_3v3_en),	\
-	ADD_FIXED_REG(pmu_hdmi_5v0_en),	\
-	ADD_FIXED_REG(vdd_fuse_en),	\
-	ADD_FIXED_REG(cam_ldo_2v8_en),	\
-	ADD_FIXED_REG(cam_ldo_1v8_en)
+	FIXED_REGS_COMMON,
+	ADD_FIXED_REG(pmu_3v3_en),
 };
 
 static struct platform_device *fixed_regs_devices_a03[] = {

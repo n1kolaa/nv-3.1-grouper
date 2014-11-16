@@ -19,9 +19,6 @@
  */
 
 #include "nvhost_cdma.h"
-#include "nvhost_channel.h"
-#include "nvhost_job.h"
-#include "nvhost_hwctx.h"
 #include "dev.h"
 #include <asm/cacheflush.h>
 
@@ -156,9 +153,7 @@ static void update_cdma_locked(struct nvhost_cdma *cdma)
 	struct nvhost_syncpt *sp = &dev->syncpt;
 	struct nvhost_job *job, *n;
 
-	/* If CDMA is stopped, queue is cleared and we can return */
-	if (!cdma->running)
-		return;
+	BUG_ON(!cdma->running);
 
 	/*
 	 * Walk the sync queue, reading the sync point registers as necessary,
