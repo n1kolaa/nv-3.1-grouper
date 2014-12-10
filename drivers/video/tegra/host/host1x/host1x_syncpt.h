@@ -71,10 +71,7 @@
 #define NVWAITBASE_MPE  (4)
 
 struct nvhost_master;
-struct nvhost_chip_support;
-
 int host1x_init_syncpt(struct nvhost_master *host);
-int host1x_init_syncpt_support(struct nvhost_master *host,
-	struct nvhost_chip_support *op);
+int host1x_init_syncpt_support(struct nvhost_master *host);
 
 #endif
