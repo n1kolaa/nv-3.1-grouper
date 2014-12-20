@@ -40,9 +40,8 @@
 #include <mach/io.h>
 #include <mach/iomap.h>
 #include <mach/legacy_irq.h>
-#include <mach/nvmap.h>
+#include <linux/nvmap.h>
 
-#include "../../../../video/tegra/nvmap/nvmap.h"
 #include "../../../../video/tegra/host/host1x/host1x_syncpt.h"
 #include "../../../../video/tegra/host/dev.h"
 #include "../../../../video/tegra/host/nvhost_acm.h"
@@ -118,6 +117,7 @@ struct nvavp_info {
 
 	struct nvhost_device		*nvhost_dev;
 	struct miscdevice		misc_dev;
+	atomic_t				clock_stay_on_refcount;
 };
 
 struct nvavp_clientctx {
@@ -128,6 +128,7 @@ struct nvavp_clientctx {
 	int num_relocs;
 	struct nvavp_info *nvavp;
 	u32 clk_reqs;
+	int clock_stay_on;
 };
 
 static struct clk *nvavp_clk_get(struct nvavp_info *nvavp, int id)
@@ -176,7 +177,8 @@ static void nvavp_clks_disable(struct nvavp_info *nvavp)
 static u32 nvavp_check_idle(struct nvavp_info *nvavp)
 {
 	struct nv_e276_control *control = nvavp->os_control;
-	return (control->put == control->get) ? 1 : 0;
+	return ((control->put == control->get)
+		&& (!atomic_read(&nvavp->clock_stay_on_refcount))) ? 1 : 0;
 }
 
 static void clock_disable_handler(struct work_struct *work)
@@ -206,8 +208,6 @@ static int nvavp_service(struct nvavp_info *nvavp)
 	if (!(inbox & NVAVP_INBOX_VALID))
 		inbox = 0x00000000;
 
-	writel(0x00000000, NVAVP_OS_INBOX);
-
 	if (inbox & NVE276_OS_INTERRUPT_VIDEO_IDLE)
 		schedule_work(&nvavp->clock_disable_work);
 
@@ -230,6 +230,7 @@ static int nvavp_service(struct nvavp_info *nvavp)
 		dev_err(&nvavp->nvhost_dev->dev, "AVP breakpoint hit\n");
 	if (inbox & NVE276_OS_INTERRUPT_TIMEOUT)
 		dev_err(&nvavp->nvhost_dev->dev, "AVP timeout\n");
+	writel(inbox & NVAVP_INBOX_VALID, NVAVP_OS_INBOX);
 
 	return 0;
 }
@@ -1049,14 +1050,14 @@ static int nvavp_force_clock_stay_on_ioctl(struct file *filp, unsigned int cmd,
 	struct nvavp_clock_stay_on_state_args clock;
 
 	if (copy_from_user(&clock, (void __user *)arg,
-			   sizeof(struct nvavp_clock_stay_on_state_args)))
+			sizeof(struct nvavp_clock_stay_on_state_args)))
 		return -EFAULT;
 
 	dev_dbg(&nvavp->nvhost_dev->dev, "%s: state=%d\n",
 		__func__, clock.state);
 
 	if (clock.state != NVAVP_CLOCK_STAY_ON_DISABLED &&
-	    clock.state !=  NVAVP_CLOCK_STAY_ON_ENABLED) {
+		clock.state !=  NVAVP_CLOCK_STAY_ON_ENABLED) {
 		dev_err(&nvavp->nvhost_dev->dev, "%s: invalid argument=%d\n",
 			__func__, clock.state);
 		return -EINVAL;
@@ -1071,6 +1072,17 @@ static int nvavp_force_clock_stay_on_ioctl(struct file *filp, unsigned int cmd,
 			nvavp_clks_disable(nvavp);
 	}
 	mutex_unlock(&nvavp->open_lock);
+
+	if (clientctx->clock_stay_on == clock.state)
+		return 0;
+
+	clientctx->clock_stay_on = clock.state;
+
+	if (clientctx->clock_stay_on == NVAVP_CLOCK_STAY_ON_ENABLED)
+		atomic_inc(&nvavp->clock_stay_on_refcount);
+	else if (clientctx->clock_stay_on == NVAVP_CLOCK_STAY_ON_DISABLED)
+		atomic_dec(&nvavp->clock_stay_on_refcount);
+
 	return 0;
 }
 
@@ -1099,6 +1111,7 @@ static int tegra_nvavp_open(struct inode *inode, struct file *filp)
 
 	clientctx->nvmap = nvavp->nvmap;
 	clientctx->nvavp = nvavp;
+	clientctx->clock_stay_on = NVAVP_CLOCK_STAY_ON_DISABLED;
 
 	filp->private_data = clientctx;
 
@@ -1130,6 +1143,8 @@ static int tegra_nvavp_release(struct inode *inode, struct file *filp)
 	if (clientctx->clk_reqs)
 		nvavp_clks_disable(nvavp);
 
+	if (clientctx->clock_stay_on ==  NVAVP_CLOCK_STAY_ON_ENABLED)
+		atomic_dec(&nvavp->clock_stay_on_refcount);
 	if (nvavp->refcount > 0)
 		nvavp->refcount--;
 	if (!nvavp->refcount)
@@ -1190,7 +1205,8 @@ static const struct file_operations tegra_nvavp_fops = {
 	.unlocked_ioctl	= tegra_nvavp_ioctl,
 };
 
-static int tegra_nvavp_probe(struct nvhost_device *ndev)
+static int tegra_nvavp_probe(struct nvhost_device *ndev,
+	struct nvhost_device_id *id_table)
 {
 	struct nvavp_info *nvavp;
 	int irq;
@@ -1237,17 +1253,7 @@ static int tegra_nvavp_probe(struct nvhost_device *ndev)
 	switch (heap_mask) {
 	case NVMAP_HEAP_IOVMM:
 
-#ifdef CONFIG_TEGRA_SMMU_BASE_AT_E0000000
-		iovmm_addr = 0xeff00000;
-#else
 		iovmm_addr = 0x0ff00000;
-#endif
-
-		/* Tegra3 A01 has different SMMU address */
-		if (tegra_get_chipid() == TEGRA_CHIPID_TEGRA3
-			&& tegra_get_revision() == TEGRA_REVISION_A01) {
-			iovmm_addr = 0xeff00000;
-		}
 
 		nvavp->os_info.handle = nvmap_alloc_iovm(nvavp->nvmap, SZ_1M,
 						L1_CACHE_BYTES,

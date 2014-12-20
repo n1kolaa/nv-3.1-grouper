@@ -1352,7 +1352,6 @@ static void sdhci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 
 	if (host->version >= SDHCI_SPEC_300) {
 		u16 clk, ctrl_2;
-		unsigned int clock;
 
 		/* In case of UHS-I modes, set High Speed Enable */
 		if (((ios->timing == MMC_TIMING_UHS_SDR50) ||
@@ -1851,13 +1850,18 @@ int sdhci_enable(struct mmc_host *mmc)
 {
 	struct sdhci_host *host = mmc_priv(mmc);
 
-	if (!mmc->card || mmc->card->type == MMC_TYPE_SDIO)
+	if (!mmc->card)
 		return 0;
 
 	if (mmc->ios.clock) {
-		if (host->ops->set_clock)
-			host->ops->set_clock(host, mmc->ios.clock);
-		sdhci_set_clock(host, mmc->ios.clock);
+		if (mmc->card->type != MMC_TYPE_SDIO) {
+			if (host->ops->set_clock)
+				host->ops->set_clock(host, mmc->ios.clock);
+			sdhci_set_clock(host, mmc->ios.clock);
+		} else {
+			if (host->ops->set_card_clock)
+				host->ops->set_card_clock(host, mmc->ios.clock);
+		}
 	}
 
 	return 0;
@@ -1867,12 +1871,18 @@ int sdhci_disable(struct mmc_host *mmc, int lazy)
 {
 	struct sdhci_host *host = mmc_priv(mmc);
 
-	if (!mmc->card || mmc->card->type == MMC_TYPE_SDIO)
+	if (!mmc->card)
 		return 0;
 
-	sdhci_set_clock(host, 0);
-	if (host->ops->set_clock)
-		host->ops->set_clock(host, 0);
+	/* For SDIO cards, only disable the card clock. */
+	if (mmc->card->type != MMC_TYPE_SDIO) {
+		sdhci_set_clock(host, 0);
+		if (host->ops->set_clock)
+			host->ops->set_clock(host, 0);
+	} else {
+		if (host->ops->set_card_clock)
+			host->ops->set_card_clock(host, 0);
+	}
 
 	return 0;
 }
@@ -2333,6 +2343,15 @@ int sdhci_suspend_host(struct sdhci_host *host, pm_message_t state)
 	}
 
 	if (mmc->card) {
+		/*
+		 * If eMMC cards are put in sleep state, Vccq can be disabled
+		 * but Vcc would still be powered on. In resume, we only restore
+		 * the controller context. So, set MMC_PM_KEEP_POWER flag.
+		 */
+		if (mmc_card_can_sleep(mmc) &&
+			!(mmc->caps & MMC_CAP2_NO_SLEEP_CMD))
+			mmc->pm_flags = MMC_PM_KEEP_POWER;
+
 		ret = mmc_suspend_host(host->mmc);
 		if (ret)
 			goto err_suspend_host;

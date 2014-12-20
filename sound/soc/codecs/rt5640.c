@@ -3343,6 +3343,7 @@ static int rt5640_probe(struct snd_soc_codec *codec)
 
 	rt5640_reg_init(codec);
 	dc_calibrate(codec);
+
 	codec->dapm.bias_level = SND_SOC_BIAS_STANDBY;
 	rt5640->codec = codec;
 	rt5640_audio_codec = codec;

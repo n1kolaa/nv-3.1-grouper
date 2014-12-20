@@ -37,14 +37,14 @@
 #include <mach/dc.h>
 #include <mach/fb.h>
 #include <linux/nvhost.h>
-#include <mach/nvmap.h>
+#include <linux/nvmap.h>
 
 #include "host/dev.h"
 #include "nvmap/nvmap.h"
 #include "dc/dc_priv.h"
 
 /* Pad pitch to 16-byte boundary. */
-#define TEGRA_LINEAR_PITCH_ALIGNMENT 16
+#define TEGRA_LINEAR_PITCH_ALIGNMENT 32
 
 struct tegra_fb_info {
 	struct tegra_dc_win	*win;
@@ -64,11 +64,27 @@ static u32 pseudo_palette[16];
 static int tegra_fb_check_var(struct fb_var_screeninfo *var,
 			      struct fb_info *info)
 {
+	struct tegra_fb_info *tegra_fb = info->par;
+	struct tegra_dc *dc = tegra_fb->win->dc;
+	struct tegra_dc_out_ops *ops = dc->out_ops;
+	struct fb_videomode mode;
+
 	if ((var->yres * var->xres * var->bits_per_pixel / 8 * 2) >
 	    info->screen_size)
 		return -EINVAL;
 
-	/* double yres_virtual to allow double buffering through pan_display */
+	/* Apply mode filter for HDMI only -LVDS supports only fix mode */
+	if (ops && ops->mode_filter) {
+
+		fb_var_to_videomode(&mode, var);
+		if (!ops->mode_filter(dc, &mode))
+			return -EINVAL;
+
+		/* Mode filter may have modified the mode */
+		fb_videomode_to_var(var, &mode);
+	}
+
+	/* Double yres_virtual to allow double buffering through pan_display */
 	var->yres_virtual = var->yres * 2;
 
 	return 0;
@@ -283,16 +299,6 @@ static int tegra_fb_blank(int blank, struct fb_info *info)
 		dev_dbg(&tegra_fb->ndev->dev, "unblank\n");
 		tegra_fb->win->flags = TEGRA_WIN_FLAG_ENABLED;
 		tegra_dc_enable(tegra_fb->win->dc);
-#if defined(CONFIG_FRAMEBUFFER_CONSOLE)
-		/*
-		* TODO:
-		* This is a work around to provide an unblanking flip
-		* to dc driver, required to display fb-console after
-		* a blank event,and needs to be replaced by a proper
-		* unblanking mechanism
-		*/
-		tegra_fb_flip_win(tegra_fb);
-#endif
 		return 0;
 
 	case FB_BLANK_NORMAL:
@@ -331,7 +337,8 @@ static int tegra_fb_pan_display(struct fb_var_screeninfo *var,
 			(var->xoffset * (var->bits_per_pixel/8));
 
 		tegra_fb->win->phys_addr = addr;
-		/* TODO: update virt_addr */
+		tegra_fb->win->flags = TEGRA_WIN_FLAG_ENABLED;
+		tegra_fb->win->virt_addr = info->screen_base;
 
 		tegra_dc_update_windows(&tegra_fb->win, 1);
 		tegra_dc_sync_windows(&tegra_fb->win, 1);
@@ -524,6 +531,7 @@ struct tegra_fb_info *tegra_fb_register(struct nvhost_device *ndev,
 	unsigned long fb_size = 0;
 	unsigned long fb_phys = 0;
 	int ret = 0;
+	unsigned stride;
 
 	win = tegra_dc_get_window(dc, fb_data->win);
 	if (!win) {
@@ -557,6 +565,11 @@ struct tegra_fb_info *tegra_fb_register(struct nvhost_device *ndev,
 		tegra_fb->valid = true;
 	}
 
+	stride = tegra_dc_get_stride(dc, 0);
+	if (!stride) /* default to pad the stride to 16-byte boundary. */
+		stride = round_up(info->fix.line_length,
+			TEGRA_LINEAR_PITCH_ALIGNMENT);
+
 	info->fbops = &tegra_fb_ops;
 	info->pseudo_palette = pseudo_palette;
 	info->screen_base = fb_base;
@@ -571,9 +584,7 @@ struct tegra_fb_info *tegra_fb_register(struct nvhost_device *ndev,
 	info->fix.smem_start	= fb_phys;
 	info->fix.smem_len	= fb_size;
 	info->fix.line_length = fb_data->xres * fb_data->bits_per_pixel / 8;
-	/* Pad the stride to 16-byte boundary. */
-	info->fix.line_length = round_up(info->fix.line_length,
-					TEGRA_LINEAR_PITCH_ALIGNMENT);
+	info->fix.line_length = stride;
 
 	info->var.xres			= fb_data->xres;
 	info->var.yres			= fb_data->yres;

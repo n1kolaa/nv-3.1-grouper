@@ -25,10 +25,10 @@
 
 #include "dev.h"
 #include "debug.h"
-#include "nvhost_cdma.h"
-#include "../../nvmap/nvmap.h"
-
 #include "host1x_hardware.h"
+#include "nvhost_cdma.h"
+#include "nvhost_channel.h"
+#include "../../nvmap/nvmap.h"
 #include "host1x_cdma.h"
 
 #define NVHOST_DEBUG_MAX_PAGE_OFFSET 102400
@@ -173,11 +173,6 @@ static void show_channel_gather(struct output *o, u32 addr,
 	u32 *map_addr, offset;
 	phys_addr_t pin_addr;
 	int state, count, i;
-
-	if ((u32)nvmap->handle == NVHOST_CDMA_PUSH_GATHER_CTXSAVE) {
-		nvhost_debug_output(o, "[context save]\n");
-		return;
-	}
 
 	if (!nvmap->handle || !nvmap->client
 			|| atomic_read(&nvmap->handle->ref) < 1) {

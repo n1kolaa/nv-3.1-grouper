@@ -676,6 +676,7 @@ static netdev_tx_t baseband_usb_netdev_start_xmit(
 		pr_err("%s: tx urb submit error\n", __func__);
 		netif_stop_queue(dev);
 		usb->stats.tx_errors++;
+		netif_stop_queue(dev);
 		return NETDEV_TX_BUSY;
 	}
 
@@ -1057,19 +1058,6 @@ static void usb_net_raw_ip_tx_urb_work(struct work_struct *work)
 		!= (struct urb *) 0) {
 		/* decrement count from usb_get_from_anchor() */
 		usb_free_urb(urb);
-		/* check if usb interface disconnected */
-		if (!usb->usb.interface) {
-			pr_err("%s: not submitting tx urb %p"
-				" - interface disconnected\n",
-				__func__, urb);
-			if (urb->transfer_buffer) {
-				kfree(urb->transfer_buffer);
-				urb->transfer_buffer = (void *) 0;
-			}
-			usb_free_urb(urb);
-			usb->stats.tx_errors++;
-			continue;
-		}
 		/* autoresume before tx */
 		usb_mark_last_busy(usb->usb.device);
 		/* submit tx urb */

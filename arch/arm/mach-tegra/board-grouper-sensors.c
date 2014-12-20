@@ -109,7 +109,7 @@ static int grouper_ov2710_power_on(void)
 		grouper_vdd_cam3 = regulator_get(NULL, "vdd_cam3");
 		if (WARN_ON(IS_ERR(grouper_vdd_cam3))) {
 			pr_err("%s: couldn't get regulator vdd_cam3: %d\n",
-				__func__, PTR_ERR(grouper_vdd_cam3));
+				__func__, (int)PTR_ERR(grouper_vdd_cam3));
 			goto reg_get_vdd_cam3_fail;
 		}
 	}
@@ -119,7 +119,7 @@ static int grouper_ov2710_power_on(void)
 		grouper_1v8_cam3 = regulator_get(NULL, "vdd_1v8_cam3");
 		if (WARN_ON(IS_ERR(grouper_1v8_cam3))) {
 			pr_err("%s: couldn't get regulator vdd_1v8_cam3: %d\n",
-				__func__, PTR_ERR(grouper_1v8_cam3));
+				__func__, (int)PTR_ERR(grouper_1v8_cam3));
 			goto reg_get_vdd_1v8_cam3_fail;
 		}
 	}

@@ -170,17 +170,28 @@ static int smb349_configure_otg(struct i2c_client *client, int enable)
 	}
 
 	if (enable) {
-		/* Configure PGOOD to be active low */
-		ret = smb349_read(client, SMB349_SYSOK_USB3);
+		/* Configure PGOOD to be active low if no 5V on VBUS */
+		ret = smb349_read(client, SMB349_STS_REG_C);
 		if (ret < 0) {
 			dev_err(&client->dev, "%s: err %d\n", __func__, ret);
 			goto error;
 		}
 
-		ret = smb349_write(client, SMB349_SYSOK_USB3, (ret & (~(1))));
-		if (ret < 0) {
-			dev_err(&client->dev, "%s: err %d\n", __func__, ret);
-			goto error;
+		if (!(ret & 0x01)) {
+			ret = smb349_read(client, SMB349_SYSOK_USB3);
+			if (ret < 0) {
+				dev_err(&client->dev, "%s: err %d\n",
+					__func__, ret);
+				goto error;
+			}
+
+			ret = smb349_write(client, SMB349_SYSOK_USB3,
+						(ret & (~(1))));
+			if (ret < 0) {
+				dev_err(&client->dev, "%s: err %d\n",
+					__func__, ret);
+				goto error;
+			}
 		}
 
 		/* Enable OTG */
@@ -274,8 +285,13 @@ error:
 
 int update_charger_status(void)
 {
-	struct i2c_client *client = charger->client;
+	struct i2c_client *client;
 	int ret, val;
+
+	if (!charger)
+		return -ENODEV;
+	else
+		client = charger->client;
 
 	val =  smb349_read(client, SMB349_STS_REG_D);
 	if (val < 0) {
@@ -375,15 +391,28 @@ static int smb349_enable_charging(struct regulator_dev *rdev,
 	int ret;
 
 	if (!max_uA) {
-		charger->state = stopped;
-		/* Disable charger */
-		ret = smb349_configure_charger(client, 0);
+		/* Wait for SMB349 to reload OTP*/
+		msleep(50);
+		ret =  smb349_read(client, SMB349_STS_REG_D);
 		if (ret < 0) {
-			dev_err(&client->dev, "%s() error in configuring"
-				"charger..\n", __func__);
-			return ret;
+			dev_err(&client->dev, "%s(): Failed in reading register"
+				"0x%02x\n", __func__, SMB349_STS_REG_D);
+		} else if (ret == 0) {
+
+			charger->state = stopped;
+			/* Disable charger */
+			ret = smb349_configure_charger(client, 0);
+			if (ret < 0) {
+				dev_err(&client->dev, "%s() error in configuring"
+					"charger..\n", __func__);
+				return ret;
+			}
+			charger->chrg_type = NONE;
 		}
 	} else {
+		/* Wait for SMB349 to reload OTP setting and detect type*/
+		msleep(500);
+
 		ret =  smb349_read(client, SMB349_STS_REG_D);
 		if (ret < 0) {
 			dev_err(&client->dev, "%s(): Failed in reading register"

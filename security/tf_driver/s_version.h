@@ -33,7 +33,7 @@
  */
 
 #define S_VERSION_OS "A"          /* "A" for all Android */
-#define S_VERSION_PLATFORM "B"    /* "B" for Tegra3 */
+#define S_VERSION_PLATFORM "A"    /* "A" for Tegra2 */
 
 /*
  * This version number must be updated for each new release

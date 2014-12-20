@@ -101,9 +101,10 @@ static __initdata struct tegra_clk_init_table p1852_clk_init_table[] = {
 	{ "pwm",		"clk_32k",	32768,		false},
 	{ "blink",		"clk_32k",	32768,		true},
 	{ "pll_a",		NULL,		552960000,	false},
-	{ "pll_a_out0",		NULL,		12288000,	false},
-	{ "d_audio",		"pll_a_out0",	12288000,	false},
-	{ "nor",		"pll_p",	86500000,	true},
+	/* audio cif clock should be faster than i2s */
+	{ "pll_a_out0",		NULL,		24576000,	false},
+	{ "d_audio",		"pll_a_out0",	24576000,	false},
+	{ "nor",		"pll_p",	102000000,	true},
 	{ "uarta",		"pll_p",	480000000,	true},
 	{ "uartd",		"pll_p",	480000000,	true},
 	{ "uarte",		"pll_p",	480000000,	true},
@@ -115,16 +116,11 @@ static __initdata struct tegra_clk_init_table p1852_clk_init_table[] = {
 	{ "sbc5",		"pll_m",	100000000,	true},
 	{ "sbc6",		"pll_m",	100000000,	true},
 	{ "cpu_g",		"cclk_g",	900000000,	true},
-	{ "i2s0",		"pll_a_out0",	12288000,	false},
-	{ "i2s1",		"pll_a_out0",	12288000,	false},
-	{ "i2s2",		"pll_a_out0",	12288000,	false},
-	{ "i2s3",		"pll_a_out0",	12288000,	false},
-	{ "i2s4",		"pll_a_out0",	12288000,	false},
-	{ "audio0",		"i2s0_sync",	12288000,	false},
-	{ "audio1",		"i2s1_sync",	12288000,	false},
-	{ "audio2",		"i2s2_sync",	12288000,	false},
-	{ "audio3",		"i2s3_sync",	12288000,	false},
-	{ "audio4",		"i2s4_sync",	12288000,	false},
+	{ "i2s0",		"pll_a_out0",	24576000,	false},
+	{ "i2s1",		"pll_a_out0",	24576000,	false},
+	{ "i2s2",		"pll_a_out0",	24576000,	false},
+	{ "i2s3",		"pll_a_out0",	24576000,	false},
+	{ "i2s4",		"pll_a_out0",	24576000,	false},
 	{ "apbif",		"clk_m",	12000000,	false},
 	{ "dam0",		"clk_m",	12000000,	true},
 	{ "dam1",		"clk_m",	12000000,	true},
@@ -132,7 +128,6 @@ static __initdata struct tegra_clk_init_table p1852_clk_init_table[] = {
 	{ "vi",			"pll_p",	470000000,	false},
 	{ "vi_sensor",		"pll_p",	150000000,	false},
 	{ "vde",		"pll_c",	484000000,	true},
-	{ "host1x",		"pll_c",	242000000,	true},
 	{ "mpe",		"pll_c",	484000000,	true},
 	{ "se",			"pll_m",	625000000,	true},
 	{ "i2c1",		"pll_p",	3200000,	true},
@@ -141,6 +136,7 @@ static __initdata struct tegra_clk_init_table p1852_clk_init_table[] = {
 	{ "i2c4",		"pll_p",	3200000,	true},
 	{ "i2c5",		"pll_p",	3200000,	true},
 	{ "sdmmc2",		"pll_p",	104000000,	false},
+	{"wake.sclk",		NULL,		334000000,	true },
 	{ NULL,			NULL,		0,		0},
 };
 
@@ -233,27 +229,63 @@ static void __init p1852_uart_init(void)
 	platform_add_devices(p1852_uart_devices,
 				ARRAY_SIZE(p1852_uart_devices));
 }
-
-static struct tegra_p1852_platform_data p1852_audio_pdata = {
+#if defined(CONFIG_TEGRA_P1852_TDM)
+static struct tegra_p1852_platform_data p1852_audio_tdm_pdata = {
 	.codec_info[0] = {
 		.codec_dai_name = "dit-hifi",
 		.cpu_dai_name = "tegra30-i2s.0",
 		.codec_name = "spdif-dit.0",
 		.name = "tegra-i2s-1",
+		.pcm_driver = "tegra-tdm-pcm-audio",
+		.i2s_format = format_tdm,
+		/* Defines whether the Codec Chip is Master or Slave */
+		.master = 1,
+		/* Defines the number of TDM slots */
+		.num_slots = 8,
+		/* Defines the width of each slot */
+		.slot_width = 32,
+		/* Defines which slots are enabled */
+		.tx_mask = 0xff,
+		.rx_mask = 0xff,
+	},
+	.codec_info[1] = {
+		.codec_dai_name = "dit-hifi",
+		.cpu_dai_name = "tegra30-i2s.4",
+		.codec_name = "spdif-dit.1",
+		.name = "tegra-i2s-2",
+		.pcm_driver = "tegra-tdm-pcm-audio",
+		.i2s_format = format_tdm,
+		.master = 1,
+		.num_slots = 8,
+		.slot_width = 32,
+		.tx_mask = 0xff,
+		.rx_mask = 0xff,
+	},
+};
+#else
+static struct tegra_p1852_platform_data p1852_audio_i2s_pdata = {
+	.codec_info[0] = {
+		.codec_dai_name = "dit-hifi",
+		.cpu_dai_name = "tegra30-i2s.0",
+		.codec_name = "spdif-dit.0",
+		.name = "tegra-i2s-1",
+		.pcm_driver = "tegra-pcm-audio",
 		.i2s_format = format_i2s,
+		/* Defines whether the Audio codec chip is master or slave */
 		.master = 1,
 	},
 	.codec_info[1] = {
 		.codec_dai_name = "dit-hifi",
-		.cpu_dai_name = "tegra30-i2s.1",
+		.cpu_dai_name = "tegra30-i2s.4",
 		.codec_name = "spdif-dit.1",
 		.name = "tegra-i2s-2",
+		.pcm_driver = "tegra-pcm-audio",
 		.i2s_format = format_i2s,
+		/* Defines whether the Audio codec chip is master or slave */
 		.master = 0,
 	},
-
 };
-
+#endif
 static struct platform_device generic_codec_1 = {
 	.name		= "spdif-dit",
 	.id			= 0,
@@ -267,19 +299,31 @@ static struct platform_device tegra_snd_p1852 = {
 	.name       = "tegra-snd-p1852",
 	.id = 0,
 	.dev    = {
-	    .platform_data = &p1852_audio_pdata,
+#if defined(CONFIG_TEGRA_P1852_TDM)
+		.platform_data = &p1852_audio_tdm_pdata,
+#else
+		.platform_data = &p1852_audio_i2s_pdata,
+#endif
 	},
 };
 
 static void p1852_i2s_audio_init(void)
 {
+	struct tegra_p1852_platform_data *pdata;
+
 	platform_device_register(&tegra_pcm_device);
+	platform_device_register(&tegra_tdm_pcm_device);
 	platform_device_register(&generic_codec_1);
 	platform_device_register(&generic_codec_2);
 	platform_device_register(&tegra_i2s_device0);
-	platform_device_register(&tegra_i2s_device1);
+	platform_device_register(&tegra_i2s_device4);
 	platform_device_register(&tegra_ahub_device);
 	platform_device_register(&tegra_snd_p1852);
+
+	/* Change pinmux of I2S4 for master mode */
+	pdata = tegra_snd_p1852.dev.platform_data;
+	if (!pdata->codec_info[1].master)
+		p1852_pinmux_set_i2s4_master();
 }
 
 
@@ -298,6 +342,15 @@ static struct spi_board_info tegra_spi_devices[] __initdata = {
 		.modalias = "spidev",
 		.bus_num = 1,
 		.chip_select = 1,
+		.mode = SPI_MODE_0,
+		.max_speed_hz = 18000000,
+		.platform_data = NULL,
+		.irq = 0,
+	},
+	{
+		.modalias = "spidev",
+		.bus_num = 2,
+		.chip_select = 0,
 		.mode = SPI_MODE_0,
 		.max_speed_hz = 18000000,
 		.platform_data = NULL,
@@ -329,11 +382,12 @@ static void p1852_spi_init(void)
 	tegra_spi_device2.name = "spi_slave_tegra";
 	platform_device_register(&tegra_spi_device1);
 	platform_device_register(&tegra_spi_device2);
+	platform_device_register(&tegra_spi_device3);
 	p852_register_spidev();
 }
 
 static struct platform_device *p1852_devices[] __initdata = {
-#if defined(CONFIG_TEGRA_IOVMM_SMMU)
+#if defined(CONFIG_TEGRA_IOVMM_SMMU) || defined(CONFIG_TEGRA_IOMMU_SMMU)
 	&tegra_smmu_device,
 #endif
 #if defined(CONFIG_TEGRA_AVP)
@@ -402,12 +456,12 @@ static struct tegra_nor_platform_data p1852_nor_data = {
 	.chip_parms = {
 		/* FIXME: Need to use characterized value */
 		.timing_default = {
-			.timing0 = 0xA0400273,
-			.timing1 = 0x00030402,
+			.timing0 = 0x30300263,
+			.timing1 = 0x00030302,
 		},
 		.timing_read = {
-			.timing0 = 0xA0400273,
-			.timing1 = 0x00030402,
+			.timing0 = 0x30300263,
+			.timing1 = 0x00030302,
 		},
 	},
 };
