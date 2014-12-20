@@ -1,7 +1,7 @@
 /*
  * arch/arm/mach-tegra/board-cardhu.c
  *
- * Copyright (c) 2011-2012, NVIDIA Corporation.
+ * Copyright (c) 2011-2012, NVIDIA Corporation.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -62,6 +62,7 @@
 #include "board.h"
 #include "clock.h"
 #include "board-cardhu.h"
+#include "board-touch.h"
 #include "devices.h"
 #include "gpio-names.h"
 #include "fuse.h"
@@ -199,6 +200,7 @@ static __initdata struct tegra_clk_init_table cardhu_clk_init_table[] = {
 	{ "i2c3",	"pll_p",	3200000,	false},
 	{ "i2c4",	"pll_p",	3200000,	false},
 	{ "i2c5",	"pll_p",	3200000,	false},
+	{ "vi",		"pll_p",	0,		false},
 	{ NULL,		NULL,		0,		0},
 };
 
@@ -227,7 +229,7 @@ static struct tegra_i2c_platform_data cardhu_i2c1_platform_data = {
 static struct tegra_i2c_platform_data cardhu_i2c2_platform_data = {
 	.adapter_nr	= 1,
 	.bus_count	= 1,
-	.bus_clk_rate	= { 100000, 0 },
+	.bus_clk_rate	= { 400000, 0 },
 	.is_clkon_always = true,
 	.scl_gpio		= {TEGRA_GPIO_PT5, 0},
 	.sda_gpio		= {TEGRA_GPIO_PT6, 0},
@@ -455,6 +457,16 @@ static void __init uart_debug_init(void)
 				debug_port_id = 1;
 	}
 
+#ifdef CONFIG_TEGRA_IRDA
+	if ((board_info.board_id == BOARD_E1186) ||
+		(board_info.board_id == BOARD_E1198)) {
+		if (debug_port_id == 1) {
+			cardhu_irda_pdata.is_irda = false;
+			pr_err("UARTB is not available for IrDA\n");
+		}
+	}
+#endif
+
 	switch (debug_port_id) {
 	case 0:
 		/* UARTA is the debug port. */
@@ -516,6 +528,9 @@ static void __init cardhu_uart_init(void)
 {
 	struct clk *c;
 	int i;
+	struct board_info board_info;
+
+	tegra_get_board_info(&board_info);
 
 	for (i = 0; i < ARRAY_SIZE(uart_parent_clk); ++i) {
 		c = tegra_get_clock_by_name(uart_parent_clk[i].name);
@@ -560,6 +575,18 @@ static void __init cardhu_uart_init(void)
 					debug_uart_clk->name);
 		}
 	}
+
+#ifdef CONFIG_TEGRA_IRDA
+	if (((board_info.board_id == BOARD_E1186) ||
+		(board_info.board_id == BOARD_E1198)) &&
+			cardhu_irda_pdata.is_irda) {
+		cardhu_irda_pdata.parent_clk_list = uart_parent_clk;
+		cardhu_irda_pdata.parent_clk_count =
+					ARRAY_SIZE(uart_parent_clk);
+
+		tegra_uartb_device.dev.platform_data = &cardhu_irda_pdata;
+	}
+#endif
 
 	platform_add_devices(cardhu_uart_devices,
 				ARRAY_SIZE(cardhu_uart_devices));
@@ -626,6 +653,10 @@ static void __init cardhu_spi_init(void)
 	platform_add_devices(cardhu_spi_devices,
 				ARRAY_SIZE(cardhu_spi_devices));
 
+	if (display_board_info.board_id == BOARD_DISPLAY_PM313) {
+		platform_add_devices(touch_spi_device,
+				ARRAY_SIZE(touch_spi_device));
+	}
 	if (board_info.board_id == BOARD_E1198) {
 		tegra_spi_device2.dev.platform_data = &cardhu_spi_pdata;
 		platform_device_register(&tegra_spi_device2);
@@ -754,6 +785,7 @@ static struct platform_device *cardhu_devices[] __initdata = {
 	&cardhu_audio_max98095_device,
 	&cardhu_audio_aic326x_device,
 	&tegra_hda_device,
+	&tegra_cec_device,
 #if defined(CONFIG_CRYPTO_DEV_TEGRA_AES)
 	&tegra_aes_device,
 #endif

@@ -175,7 +175,7 @@ static __initdata struct tegra_clk_init_table enterprise_clk_init_table[] = {
 	{ "pll_m",	NULL,		0,		false},
 	{ "hda",	"pll_p",	108000000,	false},
 	{ "hda2codec_2x","pll_p",	48000000,	false},
-	{ "pwm",	"clk_32k",	32768,		false},
+	{ "pwm",	"pll_p",	3187500,	false},
 	{ "blink",	"clk_32k",	32768,		true},
 	{ "i2s0",	"pll_a_out0",	0,		false},
 	{ "i2s1",	"pll_a_out0",	0,		false},
@@ -207,7 +207,7 @@ static struct tegra_i2c_platform_data enterprise_i2c1_platform_data = {
 static struct tegra_i2c_platform_data enterprise_i2c2_platform_data = {
 	.adapter_nr	= 1,
 	.bus_count	= 1,
-	.bus_clk_rate	= { 100000, 0 },
+	.bus_clk_rate	= { 400000, 0 },
 	.is_clkon_always = true,
 	.scl_gpio		= {TEGRA_GPIO_PT5, 0},
 	.sda_gpio		= {TEGRA_GPIO_PT6, 0},
@@ -235,7 +235,7 @@ static struct tegra_i2c_platform_data enterprise_i2c4_platform_data = {
 static struct tegra_i2c_platform_data enterprise_i2c5_platform_data = {
 	.adapter_nr	= 4,
 	.bus_count	= 1,
-	.bus_clk_rate	= { 100000, 0 },
+	.bus_clk_rate	= { 400000, 0 },
 	.scl_gpio		= {TEGRA_GPIO_PZ6, 0},
 	.sda_gpio		= {TEGRA_GPIO_PZ7, 0},
 	.arb_recovery = arb_lost_recovery,
@@ -948,11 +948,30 @@ static void enterprise_baseband_init(void)
 #endif
 	}
 }
+static void enterprise_nfc_init(void)
+{
+	struct board_info bi;
+
+	/* Enable firmware GPIO PX7 for board E1205 */
+	tegra_get_board_info(&bi);
+	if (bi.board_id == BOARD_E1205 && bi.fab >= BOARD_FAB_A03) {
+		nfc_pdata.firm_gpio = TEGRA_GPIO_PX7;
+	}
+}
 
 static void enterprise_nfc_init(void)
 {
+	struct board_info bi;
+
 	tegra_gpio_enable(TEGRA_GPIO_PS4);
 	tegra_gpio_enable(TEGRA_GPIO_PM6);
+
+	/* Enable firmware GPIO PX7 for board E1205 */
+	tegra_get_board_info(&bi);
+	if (bi.board_id == BOARD_E1205 && bi.fab >= BOARD_FAB_A03) {
+		nfc_pdata.firm_gpio = TEGRA_GPIO_PX7;
+		tegra_gpio_enable(TEGRA_GPIO_PX7);
+	}
 }
 
 static void __init tegra_enterprise_init(void)
@@ -971,6 +990,7 @@ static void __init tegra_enterprise_init(void)
 	enterprise_edp_init();
 #endif
 	enterprise_kbc_init();
+	enterprise_nfc_init();
 	enterprise_touch_init();
 	enterprise_audio_init();
 	enterprise_gps_init();

@@ -21,19 +21,16 @@
 #ifndef __NVHOST_DEV_H
 #define __NVHOST_DEV_H
 
-#include "nvhost_acm.h"
+#include <linux/cdev.h>
 #include "nvhost_syncpt.h"
 #include "nvhost_intr.h"
-#include "nvhost_channel.h"
 #include "chip_support.h"
 
 #define TRACE_MAX_LENGTH	128U
 #define IFACE_NAME		"nvhost"
 
-extern int nvhost_major;
-extern int nvhost_minor;
-
 struct nvhost_hwctx;
+struct nvhost_channel;
 
 struct nvhost_master {
 	void __iomem *aperture;

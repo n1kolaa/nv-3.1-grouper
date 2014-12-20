@@ -1,4 +1,6 @@
 GCOV_PROFILE := y
+EXTRA_CFLAGS += -Idrivers/video/tegra/host
+
 nvhost-objs = \
 	nvhost_acm.o \
 	nvhost_syncpt.o \
@@ -16,7 +18,6 @@ obj-$(CONFIG_TEGRA_GRHOST) += gr3d/
 obj-$(CONFIG_TEGRA_GRHOST) += host1x/
 obj-$(CONFIG_TEGRA_GRHOST) += t20/
 obj-$(CONFIG_TEGRA_GRHOST) += t30/
-obj-$(CONFIG_TEGRA_GRHOST) += dsi/
 obj-$(CONFIG_TEGRA_GRHOST) += gr2d/
 obj-$(CONFIG_TEGRA_GRHOST) += isp/
 obj-$(CONFIG_TEGRA_GRHOST) += vi/

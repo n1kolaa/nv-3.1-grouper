@@ -1,7 +1,7 @@
 /*
  * arch/arm/mach-tegra/include/mach/sleep-t3.S
  *
- * Copyright (c) 2010-2012, NVIDIA Corporation.
+ * Copyright (c) 2010-2011, NVIDIA Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -92,6 +92,7 @@
 #define CLK_RESET_PLLP_OUTB		0xa8
 
 #define PMC_PLLP_WB0_OVERRIDE		0xf8
+#define PMC_PLLM_WB0_OVERRIDE		0x1dc
 
 #define CLK_RESET_CLK_SOURCE_MSELECT	0x3b4
 
@@ -201,13 +202,14 @@ ENDPROC(tegra3_cpu_reset)
 #ifdef CONFIG_PM_SLEEP
 
 /*
- * tegra3_sleep_core_finish(unsigned long int)
+ * tegra3_sleep_core(unsigned long v2p)
  *
  * enters suspend in LP0 or LP1 by turning off the mmu and jumping to
  * tegra3_tear_down_core in IRAM
  */
-ENTRY(tegra3_sleep_core_finish)
-	bl	tegra_cpu_exit_coherency
+ENTRY(tegra3_sleep_core)
+	mov	r12, pc 		@ return here is via r12
+	b	tegra_cpu_save
 
 	/* preload all the address literals that are needed for the
 	 * CPU power-gating process, to avoid loads from SDRAM (which are
@@ -226,33 +228,22 @@ ENTRY(tegra3_sleep_core_finish)
 	mov32	r2, TEGRA_IRAM_CODE_AREA
 	add	r1, r1, r2
 	b	tegra_turn_off_mmu
-ENDPROC(tegra3_sleep_core_finish)
+ENDPROC(tegra3_sleep_core)
 
 /*
- * tegra3_sleep_cpu_secondary_finish(unsigned long v2p)
+ * tegra3_sleep_cpu_secondary(unsigned long v2p)
  *
  * Enters LP2 on secondary CPU by exiting coherency and powergating the CPU.
  */
-ENTRY(tegra3_sleep_cpu_secondary_finish)
-	mov	r6, lr
-
-	dsb
-#ifdef MULTI_CACHE
-	mov32	r10, cpu_cache
-	mov	lr, pc
-	ldr	pc, [r10, #CACHE_FLUSH_KERN_ALL]
-#else
-	bl	__cpuc_flush_kern_all
-#endif
-
-	bl	tegra_cpu_exit_coherency
+ENTRY(tegra3_sleep_cpu_secondary)
+	mov	r12, pc 			@ return here is via r12
+	b	tegra_cpu_save
 
 	/* Powergate this CPU. */
 	mov	r0, #0				@ power mode flags (!hotplug)
 	bl	tegra3_cpu_reset
-	mov	r0, #1				@ never return here
-	mov	pc, r6
-ENDPROC(tegra3_sleep_cpu_secondary_finish)
+	b	.				@ should never get here
+ENDPROC(tegra3_sleep_cpu_secondary)
 
 /*
  * tegra3_tear_down_cpu
@@ -527,10 +518,12 @@ tegra3_cpu_clk32k:
 	tst	r0, #PMC_CTRL_SIDE_EFFECT_LP0
 	beq	lp1_clocks_prepare
 
-	/* enable PLLM via PMC in LP0 */
+	/* enable PLLM auto-restart via PMC in LP0; restore override settings */
 	ldr	r0, [r4, #PMC_PLLP_WB0_OVERRIDE]
 	orr	r0, r0, #((1 << 12) | (1 << 11))
 	str	r0, [r4, #PMC_PLLP_WB0_OVERRIDE]
+	ldr	r0, [r4, #PMC_SCRATCH2]
+	str	r0, [r4, #PMC_PLLM_WB0_OVERRIDE]
 	mov	pc, lr
 
 	/* start by jumping to clkm to safely disable PLLs, then jump

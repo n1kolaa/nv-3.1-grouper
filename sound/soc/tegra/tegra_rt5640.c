@@ -281,8 +281,9 @@ static int tegra_rt5640_jack_notifier(struct notifier_block *self,
 	struct tegra_rt5640 *machine = snd_soc_card_get_drvdata(card);
 	struct tegra_rt5640_platform_data *pdata = machine->pdata;
 	enum headset_state state = BIT_NO_HEADSET;
-	unsigned char status_jack;
 #if 0
+	unsigned char status_jack = 0;
+
 	if (jack == &tegra_rt5640_hp_jack) {
 		if (action) {
 			/* Enable ext mic; enable signal is active-low */
@@ -486,6 +487,9 @@ static int tegra_rt5640_init(struct snd_soc_pcm_runtime *rtd)
 	machine->bias_level = SND_SOC_BIAS_STANDBY;
 	machine->clock_enabled = 1;
 
+	machine->bias_level = SND_SOC_BIAS_STANDBY;
+	machine->clock_enabled = 1;
+
 	ret = snd_soc_add_controls(codec, cardhu_controls,
 			ARRAY_SIZE(cardhu_controls));
 	if (ret < 0)
@@ -571,10 +575,25 @@ static int tegra_rt5640_set_bias_level_post(struct snd_soc_card *card,
 	return 0 ;
 }
 
+static int tegra_rt5640_resume_pre(struct snd_soc_card *card)
+{
+	int val;
+	struct snd_soc_jack_gpio *gpio = &tegra_rt5640_hp_jack_gpio;
+
+	if (gpio_is_valid(gpio->gpio)) {
+		val = gpio_get_value(gpio->gpio);
+		val = gpio->invert ? !val : val;
+		snd_soc_jack_report(gpio->jack, val, gpio->report);
+	}
+
+	return 0;
+}
+
 static struct snd_soc_card snd_soc_tegra_rt5640 = {
 	.name = "tegra-rt5640",
 	.dai_link = tegra_rt5640_dai,
 	.num_links = ARRAY_SIZE(tegra_rt5640_dai),
+	.resume_pre = tegra_rt5640_resume_pre,
 	.set_bias_level = tegra_rt5640_set_bias_level,
 	.set_bias_level_post = tegra_rt5640_set_bias_level_post,
 };
@@ -605,7 +624,7 @@ static __devinit int tegra_rt5640_driver_probe(struct platform_device *pdev)
 
 	machine->pdata = pdata;
 
-	ret = tegra_asoc_utils_init(&machine->util_data, &pdev->dev);
+	ret = tegra_asoc_utils_init(&machine->util_data, &pdev->dev, card);
 	if (ret)
 		goto err_free_machine;
 

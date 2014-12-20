@@ -26,9 +26,10 @@
 #include <linux/platform_device.h>
 #include <linux/earlysuspend.h>
 #include <linux/tegra_pwm_bl.h>
+#include <linux/pwm_backlight.h>
 #include <asm/atomic.h>
 #include <linux/nvhost.h>
-#include <mach/nvmap.h>
+#include <linux/nvmap.h>
 #include <mach/irqs.h>
 #include <mach/iomap.h>
 #include <mach/dc.h>
@@ -61,8 +62,11 @@
 
 #define enterprise_lcd_te		TEGRA_GPIO_PJ1
 
+#define enterprise_bl_pwm		TEGRA_GPIO_PH3
+
 #ifdef CONFIG_TEGRA_DC
 static struct regulator *enterprise_dsi_reg;
+static bool dsi_regulator_status;
 static struct regulator *enterprise_lcd_reg;
 
 static struct regulator *enterprise_hdmi_reg;
@@ -149,7 +153,6 @@ static bool kernel_1st_panel_init = true;
 static int enterprise_backlight_notify(struct device *unused, int brightness)
 {
 	int cur_sd_brightness = atomic_read(&sd_brightness);
-	int orig_brightness = brightness;
 
 	/* SD brightness is a percentage, 8-bit value. */
 	brightness = (brightness * cur_sd_brightness) / 255;
@@ -165,6 +168,17 @@ static int enterprise_backlight_notify(struct device *unused, int brightness)
 
 static int enterprise_disp1_check_fb(struct device *dev, struct fb_info *info);
 
+#if IS_EXTERNAL_PWM
+static struct platform_pwm_backlight_data enterprise_disp1_backlight_data = {
+	.pwm_id		= 3,
+	.max_brightness	= 255,
+	.dft_brightness	= 224,
+	.pwm_period_ns	= 1000000,
+	.notify		= enterprise_backlight_notify,
+	/* Only toggle backlight on fb blank notifications for disp1 */
+	.check_fb	= enterprise_disp1_check_fb,
+};
+#else
 /*
  * In case which_pwm is TEGRA_PWM_PM0,
  * gpio_conf_to_sfio should be TEGRA_GPIO_PW0: set LCD_CS1_N pin to SFIO
@@ -175,7 +189,6 @@ static struct platform_tegra_pwm_backlight_data enterprise_disp1_backlight_data 
 	.which_dc		= 0,
 	.which_pwm		= TEGRA_PWM_PM1,
 	.gpio_conf_to_sfio	= TEGRA_GPIO_PW1,
-	.switch_to_sfio		= &tegra_gpio_disable,
 	.max_brightness		= 255,
 	.dft_brightness		= 224,
 	.notify		= enterprise_backlight_notify,
@@ -185,9 +198,15 @@ static struct platform_tegra_pwm_backlight_data enterprise_disp1_backlight_data 
 	/* Only toggle backlight on fb blank notifications for disp1 */
 	.check_fb	= enterprise_disp1_check_fb,
 };
+#endif
+
 
 static struct platform_device enterprise_disp1_backlight_device = {
+#if IS_EXTERNAL_PWM
+	.name	= "pwm-backlight",
+#else
 	.name	= "tegra-pwm-bl",
+#endif
 	.id	= -1,
 	.dev	= {
 		.platform_data = &enterprise_disp1_backlight_data,
@@ -454,6 +473,51 @@ static struct tegra_dc_platform_data enterprise_disp2_pdata = {
 	.emc_clk_rate	= 300000000,
 };
 
+static int avdd_dsi_csi_rail_enable(void)
+{
+	int ret;
+
+	if (dsi_regulator_status == true)
+		return 0;
+
+	if (enterprise_dsi_reg == NULL) {
+		enterprise_dsi_reg = regulator_get(NULL, "avdd_dsi_csi");
+		if (IS_ERR_OR_NULL(enterprise_dsi_reg)) {
+			pr_err("dsi: Could not get regulator avdd_dsi_csi\n");
+			enterprise_dsi_reg = NULL;
+			return PTR_ERR(enterprise_dsi_reg);
+		}
+	}
+	ret = regulator_enable(enterprise_dsi_reg);
+	if (ret < 0) {
+		pr_err("DSI regulator avdd_dsi_csi could not be enabled\n");
+		return ret;
+	}
+	dsi_regulator_status = true;
+	return 0;
+}
+
+static int avdd_dsi_csi_rail_disable(void)
+{
+	int ret;
+
+	if (dsi_regulator_status == false)
+		return 0;
+
+	if (enterprise_dsi_reg == NULL) {
+		pr_warn("%s: unbalanced disable\n", __func__);
+		return -EIO;
+	}
+
+	ret = regulator_disable(enterprise_dsi_reg);
+	if (ret < 0) {
+		pr_err("DSI regulator avdd_dsi_csi cannot be disabled\n");
+		return ret;
+	}
+	dsi_regulator_status = false;
+	return 0;
+}
+
 static int enterprise_dsi_panel_enable(void)
 {
 	int ret;
@@ -461,23 +525,15 @@ static int enterprise_dsi_panel_enable(void)
 
 	tegra_get_board_info(&board_info);
 
-	if (enterprise_dsi_reg == NULL) {
-		enterprise_dsi_reg = regulator_get(NULL, "avdd_dsi_csi");
-		if (IS_ERR_OR_NULL(enterprise_dsi_reg)) {
-			pr_err("dsi: Could not get regulator avdd_dsi_csi\n");
-				enterprise_dsi_reg = NULL;
-				return PTR_ERR(enterprise_dsi_reg);
-		}
-	}
-	ret = regulator_enable(enterprise_dsi_reg);
-	if (ret < 0) {
-		printk(KERN_ERR
-			"DSI regulator avdd_dsi_csi could not be enabled\n");
+	ret = avdd_dsi_csi_rail_enable();
+	if (ret)
 		return ret;
-	}
+
+#if IS_EXTERNAL_PWM
+	tegra_gpio_disable(enterprise_bl_pwm);
+#endif
 
 #if DSI_PANEL_RESET
-
 	if (board_info.fab >= BOARD_FAB_A03) {
 		if (enterprise_lcd_reg == NULL) {
 			enterprise_lcd_reg = regulator_get(NULL, "lcd_vddio_en");
@@ -562,8 +618,8 @@ static void enterprise_stereo_set_orientation(int mode)
 #ifdef CONFIG_TEGRA_DC
 static int enterprise_dsi_panel_postsuspend(void)
 {
-	/* Do nothing for enterprise dsi panel */
-	return 0;
+	/* Disable enterprise dsi rail */
+	return avdd_dsi_csi_rail_disable();
 }
 #endif
 
@@ -762,7 +818,11 @@ static struct platform_device *enterprise_gfx_devices[] __initdata = {
 #if defined(CONFIG_TEGRA_NVMAP)
 	&enterprise_nvmap_device,
 #endif
+#if IS_EXTERNAL_PWM
+	&tegra_pwfm3_device,
+#else
 	&tegra_pwfm0_device,
+#endif
 };
 
 static struct platform_device *enterprise_bl_devices[]  = {
@@ -782,17 +842,12 @@ static void enterprise_panel_early_suspend(struct early_suspend *h)
 		fb_blank(registered_fb[0], FB_BLANK_POWERDOWN);
 	if (num_registered_fb > 1)
 		fb_blank(registered_fb[1], FB_BLANK_NORMAL);
+
 #ifdef CONFIG_TEGRA_CONVSERVATIVE_GOV_ON_EARLYSUPSEND
-	cpufreq_save_default_governor();
-	cpufreq_set_conservative_governor();
-	cpufreq_set_conservative_governor_param("up_threshold",
-			SET_CONSERVATIVE_GOVERNOR_UP_THRESHOLD);
-
-	cpufreq_set_conservative_governor_param("down_threshold",
-			SET_CONSERVATIVE_GOVERNOR_DOWN_THRESHOLD);
-
-	cpufreq_set_conservative_governor_param("freq_step",
-			SET_CONSERVATIVE_GOVERNOR_FREQ_STEP);
+	cpufreq_store_default_gov();
+	if (cpufreq_change_gov(cpufreq_conservative_gov))
+		pr_err("Early_suspend: Error changing governor to %s\n",
+				cpufreq_conservative_gov);
 #endif
 }
 
@@ -801,7 +856,8 @@ static void enterprise_panel_late_resume(struct early_suspend *h)
 	unsigned i;
 
 #ifdef CONFIG_TEGRA_CONVSERVATIVE_GOV_ON_EARLYSUPSEND
-	cpufreq_restore_default_governor();
+	if (cpufreq_restore_default_gov())
+		pr_err("Early_suspend: Unable to restore governor\n");
 #endif
 	for (i = 0; i < num_registered_fb; i++)
 		fb_blank(registered_fb[i], FB_BLANK_UNBLANK);
@@ -820,7 +876,9 @@ int __init enterprise_panel_init(void)
 	BUILD_BUG_ON(ARRAY_SIZE(enterprise_bl_output_measured_a02) != 256);
 
 	if (board_info.fab >= BOARD_FAB_A03) {
+#if !(IS_EXTERNAL_PWM)
 		enterprise_disp1_backlight_data.clk_div = 0x1D;
+#endif
 		bl_output = enterprise_bl_output_measured_a03;
 	} else
 		bl_output = enterprise_bl_output_measured_a02;

@@ -106,13 +106,26 @@
 #define I2C_HEADER_10BIT_ADDR			(1<<18)
 #define I2C_HEADER_IE_ENABLE			(1<<17)
 #define I2C_HEADER_REPEAT_START			(1<<16)
+#define I2C_HEADER_CONTINUE_XFER		(1<<15)
 #define I2C_HEADER_MASTER_ADDR_SHIFT		12
 #define I2C_HEADER_SLAVE_ADDR_SHIFT		1
 
 #define SL_ADDR1(addr) (addr & 0xff)
 #define SL_ADDR2(addr) ((addr >> 8) & 0xff)
 
+/*
+ * msg_end_type: The bus control which need to be send at end of transfer.
+ * @MSG_END_STOP: Send stop pulse at end of transfer.
+ * @MSG_END_REPEAT_START: Send repeat start at end of transfer.
+ * @MSG_END_CONTINUE: The following on message is coming and so do not send
+ *		stop or repeat start.
+ */
 
+enum msg_end_type {
+	MSG_END_STOP,
+	MSG_END_REPEAT_START,
+	MSG_END_CONTINUE,
+};
 
 struct tegra_i2c_dev;
 
@@ -132,7 +145,6 @@ struct tegra_i2c_bus {
  * @adapter: core i2c layer adapter information
  * @clk: clock reference for i2c controller
  * @i2c_clk: clock reference for i2c bus
- * @iomem: memory resource for registers
  * @base: ioremapped registers cookie
  * @cont_id: i2c controller id, used for for packet header
  * @irq: irq number of transfer complete interrupt
@@ -149,7 +161,6 @@ struct tegra_i2c_dev {
 	struct device *dev;
 	struct clk *div_clk;
 	struct clk *fast_clk;
-	struct resource *iomem;
 	struct rt_mutex dev_lock;
 	spinlock_t fifo_lock;
 	void __iomem *base;
@@ -157,7 +168,6 @@ struct tegra_i2c_dev {
 	int irq;
 	bool irq_disabled;
 	int is_dvc;
-	bool is_slave;
 	struct completion msg_complete;
 	int msg_err;
 	u8 *msg_buf;
@@ -222,6 +232,10 @@ static void i2c_writel(struct tegra_i2c_dev *i2c_dev, u32 val,
 	unsigned long reg)
 {
 	writel(val, i2c_dev->base + tegra_i2c_reg_addr(i2c_dev, reg));
+
+	/* Read back register to make sure that register writes completed */
+	if (reg != I2C_TX_FIFO)
+		readl(i2c_dev->base + tegra_i2c_reg_addr(i2c_dev, reg));
 }
 
 static u32 i2c_readl(struct tegra_i2c_dev *i2c_dev, unsigned long reg)
@@ -318,12 +332,19 @@ static int tegra_i2c_fill_tx_fifo(struct tegra_i2c_dev *i2c_dev)
 {
 	u32 val;
 	int tx_fifo_avail;
-	u8 *buf = i2c_dev->msg_buf;
-	size_t buf_remaining = i2c_dev->msg_buf_remaining;
+	u8 *buf;
+	size_t buf_remaining;
 	int words_to_transfer;
 	unsigned long flags;
 
 	spin_lock_irqsave(&i2c_dev->fifo_lock, flags);
+	if (!i2c_dev->msg_buf_remaining) {
+		spin_unlock_irqrestore(&i2c_dev->fifo_lock, flags);
+		return 0;
+	}
+
+	buf = i2c_dev->msg_buf;
+	buf_remaining = i2c_dev->msg_buf_remaining;
 
 	val = i2c_readl(i2c_dev, I2C_FIFO_STATUS);
 	tx_fifo_avail = (val & I2C_FIFO_STATUS_TX_MASK) >>
@@ -362,7 +383,12 @@ static int tegra_i2c_fill_tx_fifo(struct tegra_i2c_dev *i2c_dev)
 	 * boundary and fault.
 	 */
 	if (tx_fifo_avail > 0 && buf_remaining > 0) {
-		BUG_ON(buf_remaining > 3);
+		if (buf_remaining > 3) {
+			dev_err(i2c_dev->dev,
+				"Remaining buffer more than 3 %d\n",
+				buf_remaining);
+			BUG();
+		}
 		memcpy(&val, buf, buf_remaining);
 
 		/* Again update before writing to FIFO to make sure isr sees. */
@@ -440,8 +466,7 @@ static int tegra_i2c_init(struct tegra_i2c_dev *i2c_dev)
 	u32 val;
 	int err = 0;
 
-	if (!i2c_dev->is_clkon_always)
-		tegra_i2c_clock_enable(i2c_dev);
+	tegra_i2c_clock_enable(i2c_dev);
 
 	/* Interrupt generated before sending stop signal so
 	* wait for some time so that stop signal can be send proerly */
@@ -474,14 +499,13 @@ static int tegra_i2c_init(struct tegra_i2c_dev *i2c_dev)
 		0 << I2C_FIFO_CONTROL_RX_TRIG_SHIFT;
 	i2c_writel(i2c_dev, val, I2C_FIFO_CONTROL);
 
-	if (i2c_dev->is_slave)
+	if (!i2c_dev->is_dvc)
 		tegra_i2c_slave_init(i2c_dev);
 
 	if (tegra_i2c_flush_fifos(i2c_dev))
 		err = -ETIMEDOUT;
 
-	if (!i2c_dev->is_clkon_always)
-		tegra_i2c_clock_disable(i2c_dev);
+	tegra_i2c_clock_disable(i2c_dev);
 
 	if (i2c_dev->irq_disabled) {
 		i2c_dev->irq_disabled = 0;
@@ -639,7 +663,7 @@ err:
 }
 
 static int tegra_i2c_xfer_msg(struct tegra_i2c_bus *i2c_bus,
-	struct i2c_msg *msg, int stop)
+	struct i2c_msg *msg, enum msg_end_type end_state)
 {
 	struct tegra_i2c_dev *i2c_dev = i2c_bus->dev;
 	u32 int_mask;
@@ -672,8 +696,11 @@ static int tegra_i2c_xfer_msg(struct tegra_i2c_bus *i2c_bus,
 	i2c_writel(i2c_dev, i2c_dev->payload_size, I2C_TX_FIFO);
 
 	i2c_dev->io_header = I2C_HEADER_IE_ENABLE;
-	if (!stop)
+	if (end_state == MSG_END_CONTINUE)
+		i2c_dev->io_header |= I2C_HEADER_CONTINUE_XFER;
+	else if (end_state == MSG_END_REPEAT_START)
 		i2c_dev->io_header |= I2C_HEADER_REPEAT_START;
+
 	if (msg->flags & I2C_M_TEN) {
 		i2c_dev->io_header |= msg->addr;
 		i2c_dev->io_header |= I2C_HEADER_10BIT_ADDR;
@@ -786,18 +813,22 @@ static int tegra_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[],
 	i2c_dev->msgs = msgs;
 	i2c_dev->msgs_num = num;
 
-	if (!i2c_dev->is_clkon_always)
-		tegra_i2c_clock_enable(i2c_dev);
+	tegra_i2c_clock_enable(i2c_dev);
 
 	for (i = 0; i < num; i++) {
-		int stop = (i == (num - 1)) ? 1  : 0;
-		ret = tegra_i2c_xfer_msg(i2c_bus, &msgs[i], stop);
+		enum msg_end_type end_type = MSG_END_STOP;
+		if (i < (num - 1)) {
+			if (msgs[i + 1].flags & I2C_M_NOSTART)
+				end_type = MSG_END_CONTINUE;
+			else
+				end_type = MSG_END_REPEAT_START;
+		}
+		ret = tegra_i2c_xfer_msg(i2c_bus, &msgs[i], end_type);
 		if (ret)
 			break;
 	}
 
-	if (!i2c_dev->is_clkon_always)
-		tegra_i2c_clock_disable(i2c_dev);
+	tegra_i2c_clock_disable(i2c_dev);
 
 	rt_mutex_unlock(&i2c_dev->dev_lock);
 
@@ -818,12 +849,11 @@ static const struct i2c_algorithm tegra_i2c_algo = {
 	.functionality	= tegra_i2c_func,
 };
 
-static int tegra_i2c_probe(struct platform_device *pdev)
+static int __devinit tegra_i2c_probe(struct platform_device *pdev)
 {
 	struct tegra_i2c_dev *i2c_dev;
 	struct tegra_i2c_platform_data *plat = pdev->dev.platform_data;
 	struct resource *res;
-	struct resource *iomem;
 	struct clk *div_clk;
 	struct clk *fast_clk = NULL;
 	const unsigned int *prop;
@@ -851,51 +881,42 @@ static int tegra_i2c_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "no mem resource\n");
 		return -EINVAL;
 	}
-	iomem = request_mem_region(res->start, resource_size(res), pdev->name);
-	if (!iomem) {
-		dev_err(&pdev->dev, "I2C region already claimed\n");
-		return -EBUSY;
-	}
 
-	base = ioremap(iomem->start, resource_size(iomem));
+	base = devm_request_and_ioremap(&pdev->dev, res);
 	if (!base) {
-		dev_err(&pdev->dev, "Cannot ioremap I2C region\n");
-		return -ENOMEM;
+		dev_err(&pdev->dev, "Cannot request/ioremap I2C registers\n");
+		return -EADDRNOTAVAIL;
 	}
 
 	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 	if (!res) {
 		dev_err(&pdev->dev, "no irq resource\n");
-		ret = -EINVAL;
-		goto err_iounmap;
+		return -EINVAL;
 	}
 	irq = res->start;
 
-	div_clk = clk_get(&pdev->dev, "i2c-div");
+	div_clk = devm_clk_get(&pdev->dev, "i2c-div");
 	if (IS_ERR(div_clk)) {
 		dev_err(&pdev->dev, "missing controller clock");
-		ret = PTR_ERR(div_clk);
-		goto err_release_region;
+		return PTR_ERR(div_clk);
 	}
 
-	fast_clk = clk_get(&pdev->dev, "i2c-fast");
+	fast_clk = devm_clk_get(&pdev->dev, "i2c-fast");
 	if (IS_ERR(fast_clk)) {
 		dev_err(&pdev->dev, "missing controller fast clock");
-		ret = PTR_ERR(fast_clk);
-		goto fast_clk_err;
+		return PTR_ERR(fast_clk);
 	}
 
-	i2c_dev = kzalloc(sizeof(struct tegra_i2c_dev) +
+	i2c_dev = devm_kzalloc(&pdev->dev, sizeof(struct tegra_i2c_dev) +
 			  (nbus-1) * sizeof(struct tegra_i2c_bus), GFP_KERNEL);
 	if (!i2c_dev) {
-		ret = -ENOMEM;
-		goto err_clk_put;
+		dev_err(&pdev->dev, "Could not allocate struct tegra_i2c_dev");
+		return -ENOMEM;
 	}
 
 	i2c_dev->base = base;
 	i2c_dev->div_clk = div_clk;
 	i2c_dev->fast_clk = fast_clk;
-	i2c_dev->iomem = iomem;
 	i2c_dev->irq = irq;
 	i2c_dev->cont_id = pdev->id;
 	i2c_dev->dev = &pdev->dev;
@@ -926,9 +947,6 @@ static int tegra_i2c_probe(struct platform_device *pdev)
 	i2c_dev->arb_recovery = plat->arb_recovery;
 	init_completion(&i2c_dev->msg_complete);
 
-	if (irq == INT_I2C || irq == INT_I2C2 || irq == INT_I2C3)
-		i2c_dev->is_slave = true;
-
 	platform_set_drvdata(pdev, i2c_dev);
 
 	if (i2c_dev->is_clkon_always)
@@ -937,13 +955,14 @@ static int tegra_i2c_probe(struct platform_device *pdev)
 	ret = tegra_i2c_init(i2c_dev);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to initialize i2c controller");
-		goto err_free;
+		return ret;
 	}
 
-	ret = request_irq(i2c_dev->irq, tegra_i2c_isr, 0, pdev->name, i2c_dev);
+	ret = devm_request_irq(&pdev->dev, i2c_dev->irq,
+			tegra_i2c_isr, 0, pdev->name, i2c_dev);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to request irq %i\n", i2c_dev->irq);
-		goto err_free;
+		return ret;
 	}
 
 
@@ -991,36 +1010,18 @@ static int tegra_i2c_probe(struct platform_device *pdev)
 err_del_bus:
 	while (i2c_dev->bus_count--)
 		i2c_del_adapter(&i2c_dev->busses[i2c_dev->bus_count].adapter);
-	free_irq(i2c_dev->irq, i2c_dev);
-err_free:
-	kfree(i2c_dev);
-err_clk_put:
-	clk_put(fast_clk);
-fast_clk_err:
-	clk_put(div_clk);
-err_release_region:
-	release_mem_region(iomem->start, resource_size(iomem));
-err_iounmap:
-	iounmap(base);
 	return ret;
 }
 
-static int tegra_i2c_remove(struct platform_device *pdev)
+static int __devexit tegra_i2c_remove(struct platform_device *pdev)
 {
 	struct tegra_i2c_dev *i2c_dev = platform_get_drvdata(pdev);
+
 	while (i2c_dev->bus_count--)
 		i2c_del_adapter(&i2c_dev->busses[i2c_dev->bus_count].adapter);
 
 	if (i2c_dev->is_clkon_always)
 		tegra_i2c_clock_disable(i2c_dev);
-
-	free_irq(i2c_dev->irq, i2c_dev);
-	clk_put(i2c_dev->div_clk);
-	clk_put(i2c_dev->fast_clk);
-	release_mem_region(i2c_dev->iomem->start,
-		resource_size(i2c_dev->iomem));
-	iounmap(i2c_dev->base);
-	kfree(i2c_dev);
 	return 0;
 }
 
@@ -1066,13 +1067,13 @@ static int tegra_i2c_resume_noirq(struct device *dev)
 	return 0;
 }
 
-static const struct dev_pm_ops tegra_i2c_dev_pm_ops = {
+static const struct dev_pm_ops tegra_i2c_pm = {
 	.suspend_noirq = tegra_i2c_suspend_noirq,
 	.resume_noirq = tegra_i2c_resume_noirq,
 };
-#define TEGRA_I2C_DEV_PM_OPS (&tegra_i2c_dev_pm_ops)
+#define TEGRA_I2C_PM	(&tegra_i2c_pm)
 #else
-#define TEGRA_I2C_DEV_PM_OPS NULL
+#define TEGRA_I2C_PM	NULL
 #endif
 
 #if defined(CONFIG_OF)
@@ -1082,18 +1083,16 @@ static const struct of_device_id tegra_i2c_of_match[] __devinitconst = {
 	{},
 };
 MODULE_DEVICE_TABLE(of, tegra_i2c_of_match);
-#else
-#define tegra_i2c_of_match NULL
 #endif
 
 static struct platform_driver tegra_i2c_driver = {
 	.probe   = tegra_i2c_probe,
-	.remove  = tegra_i2c_remove,
+	.remove  = __devexit_p(tegra_i2c_remove),
 	.driver  = {
 		.name  = "tegra-i2c",
 		.owner = THIS_MODULE,
-		.of_match_table = tegra_i2c_of_match,
-		.pm    = TEGRA_I2C_DEV_PM_OPS,
+		.of_match_table = of_match_ptr(tegra_i2c_of_match),
+		.pm    = TEGRA_I2C_PM,
 	},
 };
 

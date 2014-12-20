@@ -52,3 +52,10 @@ config DHD_ENABLE_P2P
 	default n
 	---help---
 	  Use Enable Wifi Direct
+
+config BCMDHD_CUSTOM_REGULATORY_DOMAIN
+	bool "Enable Custom Regulatory Domain"
+	depends on BCMDHD
+	default y
+	---help---
+	Use Custom Regulatory Domain set by driver.

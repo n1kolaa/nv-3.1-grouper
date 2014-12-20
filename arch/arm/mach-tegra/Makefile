@@ -66,6 +66,7 @@ obj-$(CONFIG_ARCH_TEGRA_2x_SOC)         += tegra2_emc.o
 obj-$(CONFIG_ARCH_TEGRA_3x_SOC)         += tegra3_emc.o
 obj-$(CONFIG_ARCH_TEGRA_2x_SOC)         += wakeups-t2.o
 obj-$(CONFIG_ARCH_TEGRA_3x_SOC)         += wakeups-t3.o
+obj-y                                   += wakeups.o
 obj-$(CONFIG_ARCH_TEGRA_2x_SOC)         += pm-t2.o
 obj-$(CONFIG_ARCH_TEGRA_3x_SOC)         += pm-t3.o
 
@@ -79,7 +80,11 @@ obj-y                                   += reset.o
 obj-$(CONFIG_TEGRA_SYSTEM_DMA)          += dma.o
 obj-$(CONFIG_CPU_FREQ)                  += cpu-tegra.o
 ifeq ($(CONFIG_TEGRA_AUTO_HOTPLUG),y)
+ifeq ($(CONFIG_CPUQUIET_FRAMEWORK),y)
+obj-$(CONFIG_ARCH_TEGRA_3x_SOC)         += cpuquiet.o
+else
 obj-$(CONFIG_ARCH_TEGRA_3x_SOC)         += cpu-tegra3.o
+endif
 endif
 obj-$(CONFIG_TEGRA_PCI)                 += pcie.o
 obj-$(CONFIG_USB_SUPPORT)               += usb_phy.o
@@ -155,6 +160,7 @@ obj-${CONFIG_MACH_WHISTLER}             += board-whistler-memory.o
 
 obj-${CONFIG_MACH_CARDHU}               += board-cardhu.o
 obj-${CONFIG_MACH_CARDHU}               += board-cardhu-kbc.o
+obj-${CONFIG_MACH_CARDHU}               += board-cardhu-irda.o
 obj-${CONFIG_MACH_CARDHU}               += board-cardhu-panel.o
 obj-${CONFIG_MACH_CARDHU}               += board-cardhu-pinmux.o
 obj-${CONFIG_MACH_CARDHU}               += board-cardhu-power.o

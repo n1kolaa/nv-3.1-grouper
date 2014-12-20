@@ -72,11 +72,14 @@
 
 static unsigned int tegra_sdhost_min_freq;
 static unsigned int tegra_sdhost_std_freq;
+
+#ifdef CONFIG_ARCH_TEGRA_3x_SOC
 static void tegra_3x_sdhci_set_card_clock(struct sdhci_host *sdhci, unsigned int clock);
 static void tegra3_sdhci_post_reset_init(struct sdhci_host *sdhci);
 
 static unsigned int tegra3_sdhost_max_clk[4] = {
 	208000000,	104000000,	208000000,	104000000 };
+#endif
 
 struct tegra_sdhci_hw_ops{
 	/* Set the internal clk and card clk.*/
@@ -185,6 +188,7 @@ static unsigned int tegra_sdhci_get_ro(struct sdhci_host *sdhci)
 	return gpio_get_value(plat->wp_gpio);
 }
 
+#ifdef CONFIG_ARCH_TEGRA_3x_SOC
 static void tegra3_sdhci_post_reset_init(struct sdhci_host *sdhci)
 {
 	u16 misc_ctrl;
@@ -221,6 +225,7 @@ static void tegra3_sdhci_post_reset_init(struct sdhci_host *sdhci)
 		SDHCI_VENDOR_MISC_CNTRL_ENABLE_SDR50_SUPPORT;
 	sdhci_writew(sdhci, misc_ctrl, SDHCI_VENDOR_MISC_CNTRL);
 }
+#endif
 
 static int tegra_sdhci_set_uhs_signaling(struct sdhci_host *host,
 		unsigned int uhs)
@@ -364,8 +369,14 @@ static void tegra_sdhci_set_clk_rate(struct sdhci_host *sdhci,
 	struct tegra_sdhci_host *tegra_host = pltfm_host->priv;
 	unsigned int clk_rate;
 
+	/*
+	 * In SDR50 mode, run the sdmmc controller at freq greater than
+	 * 104MHz to ensure the core voltage is at 1.2V. If the core voltage
+	 * is below 1.2V, CRC errors would occur during data transfers.
+	 */
 	if (sdhci->mmc->card &&
-		mmc_card_ddr_mode(sdhci->mmc->card)) {
+		(mmc_card_ddr_mode(sdhci->mmc->card) ||
+		(sdhci->mmc->ios.timing == MMC_TIMING_UHS_SDR50))) {
 		/*
 		 * In ddr mode, tegra sdmmc controller clock frequency
 		 * should be double the card clock frequency.
@@ -378,15 +389,6 @@ static void tegra_sdhci_set_clk_rate(struct sdhci_host *sdhci,
 			clk_rate = tegra_sdhost_std_freq;
 		else
 			clk_rate = clock;
-
-		/*
-		 * In SDR50 mode, run the sdmmc controller at 208MHz to ensure
-		 * the core voltage is at 1.2V. If the core voltage is below 1.2V, CRC
-		 * errors would occur during data transfers.
-		 */
-		if ((sdhci->mmc->ios.timing == MMC_TIMING_UHS_SDR50) &&
-			(clk_rate == tegra_sdhost_std_freq))
-			clk_rate <<= 1;
 	}
 
 	if (tegra_host->max_clk_limit &&
@@ -397,6 +399,7 @@ static void tegra_sdhci_set_clk_rate(struct sdhci_host *sdhci,
 	sdhci->max_clk = clk_get_rate(pltfm_host->clk);
 }
 
+#ifdef CONFIG_ARCH_TEGRA_3x_SOC
 static void tegra_3x_sdhci_set_card_clock(struct sdhci_host *sdhci, unsigned int clock)
 {
 	int div;
@@ -407,13 +410,13 @@ static void tegra_3x_sdhci_set_card_clock(struct sdhci_host *sdhci, unsigned int
 	if (clock && clock == sdhci->clock)
 		return;
 
-        /*
-         * Disable the card clock before disabling the internal
-         * clock to avoid abnormal clock waveforms.
-         */
-        clk = sdhci_readw(sdhci, SDHCI_CLOCK_CONTROL);
-        clk &= ~SDHCI_CLOCK_CARD_EN;
-        sdhci_writew(sdhci, clk, SDHCI_CLOCK_CONTROL);
+	/*
+	 * Disable the card clock before disabling the internal
+	 * clock to avoid abnormal clock waveforms.
+	 */
+	clk = sdhci_readw(sdhci, SDHCI_CLOCK_CONTROL);
+	clk &= ~SDHCI_CLOCK_CARD_EN;
+	sdhci_writew(sdhci, clk, SDHCI_CLOCK_CONTROL);
 	sdhci_writew(sdhci, 0, SDHCI_CLOCK_CONTROL);
 
 	if (clock == 0)
@@ -481,6 +484,7 @@ set_clk:
 out:
 	sdhci->clock = clock;
 }
+#endif
 
 static void tegra_sdhci_set_clock(struct sdhci_host *sdhci, unsigned int clock)
 {
@@ -529,11 +533,6 @@ static int tegra_sdhci_signal_voltage_switch(struct sdhci_host *sdhci,
 	u16 clk, ctrl;
 	unsigned int val;
 
-	/* Switch OFF the card clock to prevent glitches on the clock line */
-	clk = sdhci_readw(sdhci, SDHCI_CLOCK_CONTROL);
-	clk &= ~SDHCI_CLOCK_CARD_EN;
-	sdhci_writew(sdhci, clk, SDHCI_CLOCK_CONTROL);
-
 	ctrl = sdhci_readw(sdhci, SDHCI_HOST_CONTROL2);
 	if (signal_voltage == MMC_SIGNAL_VOLTAGE_180) {
 		ctrl |= SDHCI_CTRL_VDD_180;
@@ -543,6 +542,17 @@ static int tegra_sdhci_signal_voltage_switch(struct sdhci_host *sdhci,
 		if (ctrl & SDHCI_CTRL_VDD_180)
 			ctrl &= ~SDHCI_CTRL_VDD_180;
 	}
+
+	/* Check if the slot can support the required voltage */
+	if (min_uV > tegra_host->vddio_max_uv)
+		return 0;
+
+	/* Switch OFF the card clock to prevent glitches on the clock line */
+	clk = sdhci_readw(sdhci, SDHCI_CLOCK_CONTROL);
+	clk &= ~SDHCI_CLOCK_CARD_EN;
+	sdhci_writew(sdhci, clk, SDHCI_CLOCK_CONTROL);
+
+	/* Set/clear the 1.8V signalling */
 	sdhci_writew(sdhci, ctrl, SDHCI_HOST_CONTROL2);
 
 	/* Switch the I/O rail voltage */
@@ -636,35 +646,14 @@ static void sdhci_tegra_set_tap_delay(struct sdhci_host *sdhci,
 	sdhci_writel(sdhci, vendor_ctrl, SDHCI_VENDOR_CLOCK_CNTRL);
 }
 
-static void sdhci_tegra_clear_set_irqs(struct sdhci_host *host,
-	u32 clear, u32 set)
-{
-	u32 ier;
-
-	ier = sdhci_readl(host, SDHCI_INT_ENABLE);
-	ier &= ~clear;
-	ier |= set;
-	sdhci_writel(host, ier, SDHCI_INT_ENABLE);
-	sdhci_writel(host, ier, SDHCI_SIGNAL_ENABLE);
-}
-
 static int sdhci_tegra_run_frequency_tuning(struct sdhci_host *sdhci)
 {
 	int err = 0;
 	u8 ctrl;
-	u32 ier;
 	u32 mask;
 	unsigned int timeout = 10;
 	int flags;
 	u32 intstatus;
-
-	/*
-	 * As per the Host Controller spec v3.00, tuning command
-	 * generates Buffer Read Ready interrupt only, so enable that.
-	 */
-	ier = sdhci_readl(sdhci, SDHCI_INT_ENABLE);
-	sdhci_tegra_clear_set_irqs(sdhci, ier, SDHCI_INT_DATA_AVAIL |
-		SDHCI_INT_DATA_CRC);
 
 	mask = SDHCI_CMD_INHIBIT | SDHCI_DATA_INHIBIT;
 	while (sdhci_readl(sdhci, SDHCI_PRESENT_STATE) & mask) {
@@ -737,7 +726,6 @@ static int sdhci_tegra_run_frequency_tuning(struct sdhci_host *sdhci)
 	}
 	mdelay(1);
 out:
-	sdhci_tegra_clear_set_irqs(sdhci, SDHCI_INT_DATA_AVAIL, ier);
 	return err;
 }
 
@@ -751,6 +739,7 @@ static int sdhci_tegra_execute_tuning(struct sdhci_host *sdhci)
 	unsigned int temp_pass_window = 0;
 	unsigned int best_low_pass_tap = 0;
 	unsigned int best_pass_window = 0;
+	u32 ier;
 
 	/* Tuning is valid only in SDR104 and SDR50 modes */
 	ctrl_2 = sdhci_readw(sdhci, SDHCI_HOST_CONTROL2);
@@ -763,9 +752,18 @@ static int sdhci_tegra_execute_tuning(struct sdhci_host *sdhci)
 	if (tap_delay_status == NULL) {
 		dev_err(mmc_dev(sdhci->mmc), "failed to allocate memory"
 			"for storing tap_delay_status\n");
-		err = -ENOMEM;
-		goto out;
+		return -ENOMEM;
 	}
+
+	/*
+	 * Disable all interrupts signalling.Enable interrupt status
+	 * detection for buffer read ready and data crc. We use
+	 * polling for tuning as it involves less overhead.
+	 */
+	ier = sdhci_readl(sdhci, SDHCI_INT_ENABLE);
+	sdhci_writel(sdhci, 0, SDHCI_SIGNAL_ENABLE);
+	sdhci_writel(sdhci, SDHCI_INT_DATA_AVAIL |
+		SDHCI_INT_DATA_CRC, SDHCI_INT_ENABLE);
 
 	/*
 	 * Set each tap delay value and run frequency tuning. After each
@@ -818,7 +816,10 @@ static int sdhci_tegra_execute_tuning(struct sdhci_host *sdhci)
 	/* Run frequency tuning */
 	err = sdhci_tegra_run_frequency_tuning(sdhci);
 
-out:
+	/* Enable the normal interrupts signalling */
+	sdhci_writel(sdhci, ier, SDHCI_INT_ENABLE);
+	sdhci_writel(sdhci, ier, SDHCI_SIGNAL_ENABLE);
+
 	if (tap_delay_status)
 		kfree(tap_delay_status);
 
@@ -927,6 +928,9 @@ static struct sdhci_ops tegra_sdhci_ops = {
 	.read_w     = tegra_sdhci_readw,
 	.write_l    = tegra_sdhci_writel,
 	.platform_8bit_width = tegra_sdhci_8bit,
+#ifdef CONFIG_ARCH_TEGRA_3x_SOC
+	.set_card_clock = tegra_3x_sdhci_set_card_clock,
+#endif
 	.set_clock  = tegra_sdhci_set_clock,
 	.suspend    = tegra_sdhci_suspend,
 	.resume     = tegra_sdhci_resume,
@@ -1071,8 +1075,9 @@ static int __devinit sdhci_tegra_probe(struct platform_device *pdev)
 		}
 		tegra_host->vdd_io_reg = regulator_get(mmc_dev(host->mmc), "vddio_sdmmc");
 		if (IS_ERR_OR_NULL(tegra_host->vdd_io_reg)) {
-			dev_err(mmc_dev(host->mmc), "%s regulator not found: %ld\n",
-				"vddio_sdmmc", PTR_ERR(tegra_host->vdd_io_reg));
+			dev_info(mmc_dev(host->mmc), "%s regulator not found: %ld."
+				"Assuming vddio_sdmmc is not required.\n",
+					"vddio_sdmmc", PTR_ERR(tegra_host->vdd_io_reg));
 			tegra_host->vdd_io_reg = NULL;
 		} else {
 			rc = regulator_set_voltage(tegra_host->vdd_io_reg,
@@ -1086,8 +1091,9 @@ static int __devinit sdhci_tegra_probe(struct platform_device *pdev)
 
 		tegra_host->vdd_slot_reg = regulator_get(mmc_dev(host->mmc), "vddio_sd_slot");
 		if (IS_ERR_OR_NULL(tegra_host->vdd_slot_reg)) {
-			dev_err(mmc_dev(host->mmc), "%s regulator not found: %ld\n",
-				"vddio_sd_slot", PTR_ERR(tegra_host->vdd_slot_reg));
+			dev_info(mmc_dev(host->mmc), "%s regulator not found: %ld."
+				" Assuming vddio_sd_slot is not required.\n",
+					"vddio_sd_slot", PTR_ERR(tegra_host->vdd_slot_reg));
 			tegra_host->vdd_slot_reg = NULL;
 		}
 
@@ -1130,11 +1136,12 @@ static int __devinit sdhci_tegra_probe(struct platform_device *pdev)
 	host->mmc->pm_caps |= MMC_PM_KEEP_POWER | MMC_PM_IGNORE_PM_NOTIFY;
 	if (plat->mmc_data.built_in) {
 		host->mmc->caps |= MMC_CAP_NONREMOVABLE;
-		host->mmc->pm_flags |= MMC_PM_IGNORE_PM_NOTIFY;
 	}
-	/* Do not turn OFF embedded sdio cards as it support Wake on Wireless */
-	if (plat->mmc_data.embedded_sdio)
-		host->mmc->pm_flags |= MMC_PM_KEEP_POWER;
+	host->mmc->pm_flags |= MMC_PM_IGNORE_PM_NOTIFY;
+
+#ifdef CONFIG_MMC_BKOPS
+	host->mmc->caps |= MMC_CAP_BKOPS;
+#endif
 
 	tegra_sdhost_min_freq = TEGRA_SDHOST_MIN_FREQ;
 #ifdef CONFIG_ARCH_TEGRA_2x_SOC

@@ -1191,6 +1191,11 @@ struct platform_device tegra_pcm_device = {
 	.id = -1,
 };
 
+struct platform_device tegra_tdm_pcm_device = {
+	.name = "tegra-tdm-pcm-audio",
+	.id = -1,
+};
+
 static struct resource w1_resources[] = {
 	[0] = {
 		.start = INT_OWR,
@@ -1416,6 +1421,79 @@ static struct resource tegra_wdt_resources[] = {
 		.end	= INT_WDT_CPU,
 		.flags	= IORESOURCE_IRQ,
 	},
+};
+
+static struct resource tegra_wdt0_resources[] = {
+	[0] = {
+		.start	= TEGRA_WDT0_BASE,
+		.end	= TEGRA_WDT0_BASE + TEGRA_WDT0_SIZE - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	[1] = {
+		.start	= TEGRA_TMR7_BASE,
+		.end	= TEGRA_TMR7_BASE + TEGRA_TMR7_SIZE - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	[2] = {
+		.start	= INT_WDT_CPU,
+		.end	= INT_WDT_CPU,
+		.flags	= IORESOURCE_IRQ,
+	},
+#ifdef CONFIG_TEGRA_FIQ_DEBUGGER
+	[3] = {
+		.start	= TEGRA_QUATERNARY_ICTLR_BASE,
+		.end	= TEGRA_QUATERNARY_ICTLR_BASE + \
+				TEGRA_QUATERNARY_ICTLR_SIZE -1,
+		.flags	= IORESOURCE_MEM,
+	},
+#endif
+};
+
+static struct resource tegra_wdt1_resources[] = {
+	[0] = {
+		.start	= TEGRA_WDT1_BASE,
+		.end	= TEGRA_WDT1_BASE + TEGRA_WDT1_SIZE - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	[1] = {
+		.start	= TEGRA_TMR8_BASE,
+		.end	= TEGRA_TMR8_BASE + TEGRA_TMR8_SIZE - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+};
+
+static struct resource tegra_wdt2_resources[] = {
+	[0] = {
+		.start	= TEGRA_WDT2_BASE,
+		.end	= TEGRA_WDT2_BASE + TEGRA_WDT2_SIZE - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	[1] = {
+		.start	= TEGRA_TMR9_BASE,
+		.end	= TEGRA_TMR9_BASE + TEGRA_TMR9_SIZE - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+};
+
+struct platform_device tegra_wdt0_device = {
+	.name		= "tegra_wdt",
+	.id		= 0,
+	.num_resources	= ARRAY_SIZE(tegra_wdt0_resources),
+	.resource	= tegra_wdt0_resources,
+};
+
+struct platform_device tegra_wdt1_device = {
+	.name		= "tegra_wdt",
+	.id		= 1,
+	.num_resources	= ARRAY_SIZE(tegra_wdt1_resources),
+	.resource	= tegra_wdt1_resources,
+};
+
+struct platform_device tegra_wdt2_device = {
+	.name		= "tegra_wdt",
+	.id		= 2,
+	.num_resources	= ARRAY_SIZE(tegra_wdt2_resources),
+	.resource	= tegra_wdt2_resources,
 };
 #endif
 
@@ -1673,6 +1751,28 @@ struct platform_device tegra_nvmap_device = {
 	.name	= "tegra-nvmap",
 	.id	= -1,
 };
+
+#ifndef CONFIG_ARCH_TEGRA_2x_SOC
+static struct resource tegra_cec_resources[] = {
+	[0] = {
+		.start = TEGRA_CEC_BASE,
+		.end = TEGRA_CEC_BASE + TEGRA_CEC_SIZE - 1,
+		.flags = IORESOURCE_MEM,
+	},
+	[1] = {
+		.start = INT_CEC,
+		.end = INT_CEC,
+		.flags = IORESOURCE_IRQ,
+	},
+};
+
+struct platform_device tegra_cec_device = {
+	.name = "tegra_cec",
+	.id   = -1,
+	.resource = tegra_cec_resources,
+	.num_resources = ARRAY_SIZE(tegra_cec_resources),
+};
+#endif
 
 void __init tegra_init_debug_uart_rate(void)
 {

@@ -1,7 +1,7 @@
 /*
  * arch/arm/mach-tegra/board-cardhu-power.c
  *
- * Copyright (C) 2011 NVIDIA, Inc.
+ * Copyright (C) 2011-2012 NVIDIA, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -42,7 +42,6 @@
 #include "board.h"
 #include "board-cardhu.h"
 #include "pm.h"
-#include "wakeups-t3.h"
 #include "tegra3_tsensor.h"
 
 #define PMC_CTRL		0x0
@@ -192,7 +191,7 @@ static struct regulator_consumer_supply tps6591x_ldo8_supply_0[] = {
 
 TPS_PDATA_INIT(vdd1, skubit0_0, 600,  1500, 0, 1, 1, 0, -1, 0, 0, EXT_CTRL_SLEEP_OFF, 0, true);
 TPS_PDATA_INIT(vdd1, skubit0_1, 600,  1500, 0, 1, 1, 0, -1, 0, 0, EXT_CTRL_SLEEP_OFF, 0, true);
-TPS_PDATA_INIT(vdd2, 0,         600,  1500, 0, 1, 1, 0, -1, 0, 0, 0, 0, false);
+TPS_PDATA_INIT(vdd2, 0,         600,  1500, 0, 0, 1, 0, -1, 0, 0, 0, 0, false);
 TPS_PDATA_INIT(vddctrl, 0,      600,  1400, 0, 1, 1, 0, -1, 0, 0, EXT_CTRL_EN1, 0, true);
 TPS_PDATA_INIT(vio,  0,         1500, 3300, 0, 1, 1, 0, -1, 0, 0, 0, 0, false);
 
@@ -487,7 +486,8 @@ int __init cardhu_regulator_init(void)
 	/* E1291-A04/A05: Enable DEV_SLP and enable sleep on GPIO2 */
 	if ((board_info.board_id == BOARD_E1291) &&
 			((board_info.fab == BOARD_FAB_A04) ||
-			 (board_info.fab == BOARD_FAB_A05))) {
+			 (board_info.fab == BOARD_FAB_A05) ||
+			 (board_info.fab == BOARD_FAB_A07))) {
 		tps_platform.dev_slp_en = true;
 		tps_platform.gpio_init_data = tps_gpio_pdata_e1291_a04;
 		tps_platform.num_gpioinit_data =
@@ -603,13 +603,15 @@ static struct regulator_consumer_supply fixed_reg_en_vdd_pnl1_supply[] = {
 /* CAM1_LDO_EN from AP GPIO KB_ROW6 R06*/
 static struct regulator_consumer_supply fixed_reg_cam1_ldo_en_supply[] = {
 	REGULATOR_SUPPLY("vdd_2v8_cam1", NULL),
-	REGULATOR_SUPPLY("vdd", "6-0072"),
+	REGULATOR_SUPPLY("avdd", "6-0072"),
+	REGULATOR_SUPPLY("vdd", "6-000e"),
 };
 
 /* CAM2_LDO_EN from AP GPIO KB_ROW7 R07*/
 static struct regulator_consumer_supply fixed_reg_cam2_ldo_en_supply[] = {
 	REGULATOR_SUPPLY("vdd_2v8_cam2", NULL),
-	REGULATOR_SUPPLY("vdd", "7-0072"),
+	REGULATOR_SUPPLY("avdd", "7-0072"),
+	REGULATOR_SUPPLY("vdd", "7-000e"),
 };
 
 /* CAM3_LDO_EN from AP GPIO KB_ROW8 S00*/
@@ -647,8 +649,10 @@ static struct regulator_consumer_supply fixed_reg_en_1v8_cam_supply[] = {
 	REGULATOR_SUPPLY("vdd_1v8_cam1", NULL),
 	REGULATOR_SUPPLY("vdd_1v8_cam2", NULL),
 	REGULATOR_SUPPLY("vdd_1v8_cam3", NULL),
-	REGULATOR_SUPPLY("vdd_i2c", "6-0072"),
-	REGULATOR_SUPPLY("vdd_i2c", "7-0072"),
+	REGULATOR_SUPPLY("dvdd", "6-0072"),
+	REGULATOR_SUPPLY("dvdd", "7-0072"),
+	REGULATOR_SUPPLY("vdd_i2c", "6-000e"),
+	REGULATOR_SUPPLY("vdd_i2c", "7-000e"),
 	REGULATOR_SUPPLY("vdd_i2c", "2-0033"),
 };
 
@@ -838,6 +842,7 @@ FIXED_REG_OD(17, en_vddio_vid_oc,	en_vddio_vid_oc,	FIXED_SUPPLY(en_5v0), 		0,   
 	ADD_FIXED_REG(en_3v3_pex_hvdd_pm269),	\
 	ADD_FIXED_REG(en_1v8_cam),		\
 	ADD_FIXED_REG(dis_5v_switch_e118x),	\
+	ADD_FIXED_REG(en_vbrtr),		\
 	ADD_FIXED_REG(en_usb1_vbus_oc_e118x),	\
 	ADD_FIXED_REG(en_usb3_vbus_oc_e118x),	\
 	ADD_FIXED_REG(en_vddio_vid_oc_pm269),
@@ -1028,7 +1033,8 @@ int __init cardhu_fixed_regulator_init(void)
 			nfixreg_devs = ARRAY_SIZE(fixed_reg_devs_e1291_a03);
 			fixed_reg_devs = fixed_reg_devs_e1291_a03;
 		} else if ((board_info.fab == BOARD_FAB_A04) ||
-				(board_info.fab == BOARD_FAB_A05)) {
+				(board_info.fab == BOARD_FAB_A05) ||
+				(board_info.fab == BOARD_FAB_A07)) {
 			nfixreg_devs = ARRAY_SIZE(fixed_reg_devs_e1291_a04);
 			fixed_reg_devs = fixed_reg_devs_e1291_a04;
 		} else {
@@ -1151,17 +1157,6 @@ int __init cardhu_suspend_init(void)
 	tegra_init_suspend(&cardhu_suspend_data);
 	return 0;
 }
-
-static struct tegra_tsensor_pmu_data  tpdata = {
-	.poweroff_reg_addr = 0x3F,
-	.poweroff_reg_data = 0x80,
-	.reset_tegra = 1,
-	.controller_type = 0,
-	.i2c_controller_id = 4,
-	.pinmux = 0,
-	.pmu_16bit_ops = 0,
-	.pmu_i2c_addr = 0x2D,
-};
 
 #ifdef CONFIG_TEGRA_EDP_LIMITS
 

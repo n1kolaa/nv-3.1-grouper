@@ -59,6 +59,7 @@
 #include "board.h"
 #include "clock.h"
 #include "board-kai.h"
+#include "board-touch.h"
 #include "devices.h"
 #include "gpio-names.h"
 #include "fuse.h"
@@ -166,8 +167,15 @@ static struct platform_device kai_bluesleep_device = {
 
 static noinline void __init kai_tegra_setup_tibluesleep(void)
 {
+	int ret;
+
+	ret = gpio_request(TEGRA_GPIO_PU6, "host_wake");
+	if (ret)
+		pr_err("gpio_request failed for gpio: %d\n", TEGRA_GPIO_PU6);
+	else
+		gpio_direction_input(TEGRA_GPIO_PU6);
+
 	platform_device_register(&kai_bluesleep_device);
-	tegra_gpio_enable(TEGRA_GPIO_PU6);
 }
 
 static __initdata struct tegra_clk_init_table kai_clk_init_table[] = {
@@ -276,6 +284,17 @@ static struct i2c_board_info kai_i2c4_max17048_board_info[] = {
 		I2C_BOARD_INFO("max17048", 0x36),
 		.platform_data = &max17048_mdata,
 	},
+};
+
+static struct regulator_consumer_supply smb349_vbus_supply[] = {
+	REGULATOR_SUPPLY("usb_bat_chg", NULL),
+};
+
+static struct smb349_charger_platform_data smb349_charger_pdata = {
+	.max_charge_current_mA = 1000,
+	.charging_term_current_mA = 100,
+	.consumer_supplies = smb349_vbus_supply,
+	.num_consumer_supplies = ARRAY_SIZE(smb349_vbus_supply),
 };
 
 static struct regulator_consumer_supply smb349_vbus_supply[] = {
@@ -480,7 +499,6 @@ static struct platform_device tegra_camera = {
 };
 
 static struct platform_device *kai_spi_devices[] __initdata = {
-	&tegra_spi_device4,
 	&tegra_spi_device1,
 };
 
@@ -494,11 +512,11 @@ static struct spi_clk_parent spi_parent_clk[] = {
 #endif
 };
 
-static struct tegra_spi_platform_data kai_spi_pdata = {
-	.is_dma_based		= true,
-	.max_dma_buffer		= (16 * 1024),
-	.is_clkon_always	= false,
-	.max_rate		= 100000000,
+static struct tegra_spi_platform_data kai_spi1_pdata = {
+		.is_dma_based           = true,
+		.max_dma_buffer         = (128),
+		.is_clkon_always        = false,
+		.max_rate               = 100000000,
 };
 
 static void __init kai_spi_init(void)
@@ -516,9 +534,10 @@ static void __init kai_spi_init(void)
 		spi_parent_clk[i].parent_clk = c;
 		spi_parent_clk[i].fixed_clk_rate = clk_get_rate(c);
 	}
-	kai_spi_pdata.parent_clk_list = spi_parent_clk;
-	kai_spi_pdata.parent_clk_count = ARRAY_SIZE(spi_parent_clk);
-	tegra_spi_device4.dev.platform_data = &kai_spi_pdata;
+
+	kai_spi1_pdata.parent_clk_list = spi_parent_clk;
+	kai_spi1_pdata.parent_clk_count = ARRAY_SIZE(spi_parent_clk);
+	tegra_spi_device1.dev.platform_data = &kai_spi1_pdata;
 	platform_add_devices(kai_spi_devices,
 				ARRAY_SIZE(kai_spi_devices));
 
@@ -706,8 +725,6 @@ static struct usb_phy_plat_data tegra_usb_phy_pdata[] = {
 	[0] = {
 			.instance = 0,
 			.vbus_gpio = -1,
-			.vbus_irq = MAX77663_IRQ_BASE +
-							MAX77663_IRQ_ACOK_RISING,
 	},
 	[1] = {
 			.instance = 1,
@@ -799,7 +816,6 @@ static void __init tegra_kai_init(void)
 	kai_edp_init();
 #endif
 	kai_uart_init();
-	kai_tsensor_init();
 	kai_audio_init();
 	platform_add_devices(kai_devices, ARRAY_SIZE(kai_devices));
 	tegra_ram_console_debug_init();
