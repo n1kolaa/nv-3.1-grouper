@@ -86,7 +86,6 @@ int grouper_ti_suspend_init(void);
 int grouper_ti_edp_init(void);
 
 void __init grouper_tsensor_init(void);
-int __init touch_init_raydium(int irq_gpio, int reset_gpio, int platform);
 int __init touch_init_synaptics_grouper(void);
 
 #define TOUCH_GPIO_IRQ_RAYDIUM_SPI      TEGRA_GPIO_PZ3
