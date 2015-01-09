@@ -1142,8 +1142,7 @@ int __init cardhu_sensors_init(void)
 	i2c_register_board_info(4, cardhu_i2c4_nct1008_board_info,
 		ARRAY_SIZE(cardhu_i2c4_nct1008_board_info));
 
-	if (board_info.board_id != BOARD_PM315)
-		mpuirq_init();
+	mpuirq_init();
 
 #ifdef CONFIG_SOC_CAMERA_OV5650
 	t30_get_tegra_vi01_device()->dev.platform_data =
