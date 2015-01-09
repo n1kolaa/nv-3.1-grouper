@@ -138,8 +138,8 @@ static struct tegra_sdhci_platform_data tegra_sdhci_platform_data2 = {
 	.cd_gpio = -1,
 	.wp_gpio = -1,
 	.power_gpio = -1,
-/*	.tap_delay = 6,
-	.is_voltage_switch_supported = false,
+	.tap_delay = 0x0F,
+/*	.is_voltage_switch_supported = false,
 	.vdd_rail_name = NULL,
 	.slot_rail_name = NULL,
 	.vdd_max_uv = -1,
@@ -156,9 +156,9 @@ static struct tegra_sdhci_platform_data tegra_sdhci_platform_data3 = {
 	.tap_delay = 0x0F,
 	.mmc_data = {
 		.built_in = 1,
-	}
-/*	.tap_delay = 6,
-	.is_voltage_switch_supported = false,
+	},
+	.tap_delay = 0x0F,
+/*	.is_voltage_switch_supported = false,
 	.vdd_rail_name = NULL,
 	.slot_rail_name = NULL,
 	.vdd_max_uv = -1,
